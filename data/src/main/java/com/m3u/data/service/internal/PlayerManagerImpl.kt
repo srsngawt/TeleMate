@@ -19,6 +19,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.datasource.rtmp.RtmpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.MediaExtractorCompat
 import androidx.media3.exoplayer.RenderersFactory
@@ -609,6 +610,16 @@ class PlayerManagerImpl @Inject constructor(
         uri
     }
 
+    private fun createLoadControl(): DefaultLoadControl = DefaultLoadControl.Builder()
+        .setBufferDurationsMs(
+            15_000,
+            30_000,
+            1_000,
+            2_000
+        )
+        .setPrioritizeTimeOverSizeThresholds(true)
+        .build()
+
     private fun createPlayer(
         mediaSourceFactory: MediaSource.Factory,
         tunneling: Boolean,
@@ -617,6 +628,7 @@ class PlayerManagerImpl @Inject constructor(
         .setMediaSourceFactory(mediaSourceFactory)
         .setRenderersFactory(renderersFactory)
         .setTrackSelector(createTrackSelector(tunneling))
+        .setLoadControl(createLoadControl())
         .setHandleAudioBecomingNoisy(true)
         .build()
         .apply {

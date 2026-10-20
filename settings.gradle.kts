@@ -17,7 +17,7 @@ dependencyResolutionManagement {
         maven("https://plugins.gradle.org/m2/")
     }
 }
-rootProject.name = "M3U"
+rootProject.name = "TeleMate"
 include(
     ":app:smartphone",
     ":app:tv"
