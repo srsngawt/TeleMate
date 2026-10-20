@@ -58,9 +58,16 @@ fun App(
     val currentDiagnosticsShareTitle by rememberUpdatedState(diagnosticsShareTitle)
     var destination by remember { mutableStateOf(TvDestination.Home) }
     var surface by remember { mutableStateOf(TvSurface.Browse) }
+    var activeRecording by remember { mutableStateOf<TvRecording?>(null) }
     val closePlayer = {
-        viewModel.releasePlayer()
+        activeRecording = null
         surface = TvSurface.Browse
+    }
+
+    LaunchedEffect(state.channels) {
+        if (currentChannel == null && state.channels.isNotEmpty()) {
+            viewModel.play(state.recent ?: state.channels.first())
+        }
     }
 
     val backTarget = tvAppBackTarget(
@@ -106,96 +113,89 @@ fun App(
             .background(TvColors.Background)
             .windowInsetsPadding(WindowInsets.safeDrawing)
     ) {
-        TvBackdrop(channel = currentChannel ?: state.heroChannel)
-        Row(Modifier.fillMaxSize()) {
-            TvNavigationRail(
-                selected = destination,
-                onSelect = { destination = it }
-            )
-            TvBrowsePane(
-                destination = destination,
-                state = state,
-                onOpenLibrary = { destination = TvDestination.Library },
-                onPlaylist = {
-                    viewModel.selectPlaylist(it)
-                    destination = TvDestination.Library
-                },
-                onRefresh = viewModel::refreshSelectedPlaylist,
-                onPlay = {
-                    viewModel.play(it)
-                    surface = TvSurface.Player
-                },
-                onPlayRecent = {
-                    viewModel.playRecent()
-                    surface = TvSurface.Player
-                },
-                onExternalExtensionsEnabled = viewModel::setExternalExtensionsEnabled,
-                onEnableExtension = viewModel::enableExtensionPlugin,
-                onReauthorizeExtension = viewModel::reauthorizeExtensionPlugin,
-                onDisableExtension = viewModel::disableExtensionPlugin,
-                onRevokeExtension = viewModel::revokeExtensionPlugin,
-                onClearExtensionData = viewModel::clearExtensionData,
-                onExportExtensionDiagnostics = viewModel::exportExtensionDiagnostics,
-                onOpenExtensionSettings = { extensionId ->
-                    viewModel.openExtensionSettings(extensionId, localeTag)
-                },
-                onCloseExtensionSettings = viewModel::closeExtensionSettings,
-                onUpdateExtensionSetting = { sectionId, fieldKey, editToken, value ->
-                    viewModel.updateExtensionSetting(
-                        sectionId,
-                        fieldKey,
-                        editToken,
-                        value,
-                        localeTag,
+        TiviMateGuideScreen(
+            channels = state.channels,
+            favoriteChannels = state.favorites,
+            player = if (surface == TvSurface.Browse && activeRecording == null) player else null,
+            activeChannel = currentChannel,
+            currentProgrammes = state.currentProgrammes,
+            onPlayChannel = { channel ->
+                activeRecording = null
+                viewModel.play(channel)
+            },
+            onToggleFavorite = { channel ->
+                viewModel.toggleFavorite(channel)
+            },
+            onOpenFullscreen = {
+                surface = TvSurface.Player
+            },
+            onPlayRecording = { rec ->
+                activeRecording = rec
+                val matchingChannel = state.channels.find { it.id == rec.channelId || it.url == rec.streamUrl }
+                if (matchingChannel != null) {
+                    viewModel.play(matchingChannel)
+                } else {
+                    viewModel.play(
+                        com.m3u.data.database.model.Channel(
+                            id = rec.channelId,
+                            title = rec.channelName,
+                            url = rec.streamUrl,
+                            playlistUrl = "",
+                            category = "Recordings",
+                            cover = rec.coverUrl
+                        )
                     )
-                },
-                onRefreshProviders = viewModel::refreshSubscriptionProviders,
-                onOpenProviderSubscription = viewModel::openProviderSubscription,
-                onReauthenticateProvider = viewModel::reauthenticateProviderAccount,
-                onCloseProviderSubscription = viewModel::closeProviderSubscription,
-                onUpdateProviderTitle = viewModel::updateProviderSubscriptionTitle,
-                onSelectProviderKind = viewModel::selectProviderKind,
-                onUpdateProviderSetting = viewModel::updateProviderSetting,
-                onSubmitProviderSubscription = viewModel::submitProviderSubscription,
-            )
-        }
+                }
+                surface = TvSurface.Player
+            }
+        )
 
         AnimatedVisibility(
             visible = surface == TvSurface.Player,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
-            TvPlayerScreen(
-                player = player,
-                channel = currentChannel,
-                isPlaying = isPlaying,
-                playbackState = playbackState,
-                onPlayPause = { viewModel.pauseOrContinue(!isPlaying) },
-                onBack = closePlayer,
-                onClose = closePlayer
-            )
+            val recording = activeRecording
+            if (recording != null) {
+                TiviMateRecordingPlayerScreen(
+                    player = player,
+                    recording = recording,
+                    isPlaying = isPlaying,
+                    onPlayPause = { viewModel.pauseOrContinue(!isPlaying) },
+                    onClose = closePlayer
+                )
+            } else {
+                TiviMatePlayerScreen(
+                    player = player,
+                    channel = currentChannel,
+                    channelList = state.channels,
+                    favoriteChannels = state.favorites,
+                    isPlaying = isPlaying,
+                    onPlayPause = { viewModel.pauseOrContinue(!isPlaying) },
+                    onSwitchChannel = { channel ->
+                        viewModel.play(channel)
+                    },
+                    onToggleFavorite = { channel ->
+                        viewModel.toggleFavorite(channel)
+                    },
+                    onBackToGuide = closePlayer
+                )
+            }
         }
 
         remoteControlCode?.let { code ->
             val displayCode = code.toString().padStart(6, '0')
-            val spokenCode = displayCode.toCharArray().joinToString(separator = " ")
-            val pairingCodeDescription =
-                stringResource(string.ui_remote_control_pairing_code, spokenCode)
             Text(
-                text = displayCode,
-                color = TvColors.TextPrimary,
+                text = "Pair: $displayCode",
+                color = TvColors.TextMuted,
                 fontFamily = TvFonts.Body,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(24.dp)
-                    .background(TvColors.Surface.copy(alpha = 0.86f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 18.dp, vertical = 10.dp)
-                    .clearAndSetSemantics {
-                        contentDescription = pairingCodeDescription
-                        liveRegion = LiveRegionMode.Polite
-                    }
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 24.dp, bottom = 12.dp)
+                    .background(TvColors.Surface.copy(alpha = 0.85f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
             )
         }
     }

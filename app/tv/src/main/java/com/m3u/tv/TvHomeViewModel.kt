@@ -15,6 +15,7 @@ import com.m3u.core.foundation.architecture.preferences.set
 import com.m3u.data.database.model.Channel
 import com.m3u.data.database.model.DataSource
 import com.m3u.data.database.model.Playlist
+import com.m3u.data.database.model.Programme
 import com.m3u.data.repository.channel.ChannelRepository
 import com.m3u.data.repository.extension.ExtensionSettingEditToken
 import com.m3u.data.repository.extension.ExtensionSettingUpdateResult
@@ -36,6 +37,9 @@ import com.m3u.data.service.MediaCommand
 import com.m3u.data.service.PlayerManager
 import com.m3u.extension.api.ExtensionId
 import com.m3u.extension.api.subscription.SubscriptionProviderDescriptor
+import com.m3u.data.repository.programme.ProgrammeRepository
+import androidx.work.WorkManager
+import com.m3u.data.worker.SubscriptionWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.Locale
 import javax.inject.Inject
@@ -63,6 +67,8 @@ data class TvUiState(
     val favorites: List<Channel> = emptyList(),
     val recent: Channel? = null,
     val loadingChannels: Boolean = false,
+    // Map of channel tvg-id (relationId) -> currently airing Programme
+    val currentProgrammes: Map<String, Programme> = emptyMap(),
     val externalExtensionsEnabled: Boolean = false,
     val extensionPlugins: List<InstalledPlugin> = emptyList(),
     val extensionSettings: ExtensionSettingsConfiguration? = null,
@@ -95,6 +101,8 @@ class TvHomeViewModel @Inject constructor(
     private val extensionSettingsRepository: ExtensionSettingsRepository,
     private val subscriptionProviderRepository: SubscriptionProviderRepository,
     private val settings: Settings,
+    private val workManager: WorkManager,
+    private val programmeRepository: ProgrammeRepository,
     tvRepository: TvRepository,
     dPadReactionService: DPadReactionService
 ) : ViewModel() {
@@ -174,6 +182,7 @@ class TvHomeViewModel @Inject constructor(
         observeExternalExtensions()
         observeProviderAccounts()
         refreshSubscriptionProviders()
+        observeEpgProgrammes()
     }
 
     fun selectPlaylist(playlist: Playlist) {
@@ -742,6 +751,8 @@ class TvHomeViewModel @Inject constructor(
         }
     }
 
+    private var hasAutoSubscribed = false
+
     private fun observePlaylists() {
         viewModelScope.launch {
             playlistRepository
@@ -757,6 +768,14 @@ class TvHomeViewModel @Inject constructor(
                                 locale = sortLocale,
                             )
                         )
+                    if (playlists.isEmpty() && !hasAutoSubscribed) {
+                        hasAutoSubscribed = true
+                        SubscriptionWorker.m3u(
+                            workManager = workManager,
+                            title = "TeleMate India",
+                            url = DEFAULT_PLAYLIST_URL
+                        )
+                    }
                     val previous = state.selectedPlaylist
                     val selected = previous
                         ?.let { active -> playlists.firstOrNull { it.url == active.url } }
@@ -827,6 +846,28 @@ class TvHomeViewModel @Inject constructor(
 
     private companion object {
         const val TV_SETTINGS_SURFACE = "tv"
+        const val DEFAULT_PLAYLIST_URL = "https://raw.githubusercontent.com/srsngawt/TeleMate/master/clean_india.m3u"
+    }
+
+    /**
+     * Periodically refreshes EPG "currently airing" data for all channels.
+     * Updates every 60 seconds so the guide always reflects live show info.
+     */
+    private fun observeEpgProgrammes() {
+        viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                val playlistUrl = _state.value.selectedPlaylist?.url
+                if (playlistUrl != null) {
+                    try {
+                        val programmes = programmeRepository.getProgrammesCurrently(playlistUrl)
+                        _state.update { it.copy(currentProgrammes = programmes) }
+                    } catch (_: Exception) {
+                        // EPG data may not be available; silently ignore
+                    }
+                }
+                kotlinx.coroutines.delay(60_000L)
+            }
+        }
     }
 }
 

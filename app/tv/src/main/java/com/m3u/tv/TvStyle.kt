@@ -11,18 +11,40 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 
+/**
+ * Authentic TiviMate Premium TV Palette — Broadcast Grade Obsidian & Slate Edition.
+ * Pure deep matte charcoal obsidian base, refined gunmetal card surfaces,
+ * subtle 12% hairline borders, elegant titanium/slate focus states (no oversaturated neon),
+ * and crisp typography.
+ */
 object TvColors {
-    val Background = Color(0xFF05070B)
-    val BackgroundSoft = Color(0xFF0D1118)
-    val Surface = Color(0xFF151B24)
-    val SurfaceRaised = Color(0xFF202A36)
-    val Focus = Color(0xFF8DF2C7)
-    val Accent = Color(0xFFFFC37A)
-    val Danger = Color(0xFFFF8A80)
-    val OnFocus = Color(0xFF06100C)
-    val TextPrimary = Color(0xFFF7FAFC)
-    val TextSecondary = Color(0xFFB6C1CC)
-    val TextMuted = Color(0xFF7B8794)
+    // Deep matte obsidian and graphite base
+    val Background = Color(0xFF0C0E14)
+    val BackgroundSoft = Color(0xFF12161F)
+    val Surface = Color(0xFF161B24)
+    val SurfaceRaised = Color(0xFF1C222E)
+    val SurfaceHighlight = Color(0xFF242C3B)
+    val SurfaceGlass = Color(0x99161B24)
+
+    // Subtle, elegant borders (never glaring or oversaturated)
+    val BorderSubtle = Color(0x1FFFFFFF) // Delicate 12% white hairline
+    val BorderGlass = Color(0x33FFFFFF)  // 20% white highlight
+
+    // Authentic TiviMate Focus & Accent — Sophisticated Slate Blue & Titanium
+    val Focus = Color(0xFF1E3A5F)         // Deep refined TV slate blue
+    val FocusSurface = Color(0xFF223249)  // Card highlight on focus
+    val FocusGlow = Color(0xFF3B82F6)     // Subtle 1.5dp focus ring (clean, not neon)
+    val Accent = Color(0xFF2563EB)        // Clean accent
+    val Danger = Color(0xFFDC2626)        // Clean crimson (LIVE badge & Record)
+    val Success = Color(0xFF10B981)
+
+    // Typography
+    val OnFocus = Color(0xFFFFFFFF)
+    val TextPrimary = Color(0xFFFFFFFF)
+    val TextSecondary = Color(0xFF94A3B8) // Neutral slate silver
+    val TextMuted = Color(0xFF64748B)     // Graphite muted
+    val BadgeBackground = Color(0xFF1E2532)
+    val TimelineMarker = Color(0xFF2563EB)
 }
 
 object TvFonts {

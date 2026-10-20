@@ -707,7 +707,7 @@ class PlayerManagerImpl @Inject constructor(
             setParameters(
                 buildUponParameters()
                     .setForceHighestSupportedBitrate(true)
-                    .setTunnelingEnabled(tunneling)
+                    .setTunnelingEnabled(false)
             )
         }
     }

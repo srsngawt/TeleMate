@@ -26,3 +26,8 @@ testing/mock-server/bin/
 testing/mock-server/build/
 testing/extension-reference/build/
 samples/*/build/
+*.mov
+*.png
+*.webp
+video_frames*/
+APP_SECURITY_AUDIT_REPORT.md
