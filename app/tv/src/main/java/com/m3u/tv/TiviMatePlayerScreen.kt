@@ -46,12 +46,14 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.HighQuality
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -91,6 +93,8 @@ fun TiviMatePlayerScreen(
     player: Player?,
     channel: Channel?,
     channelList: List<Channel>,
+    categoryChannels: List<Channel> = channelList,
+    currentCategoryName: String = "",
     favoriteChannels: List<Channel>,
     isPlaying: Boolean,
     onPlayPause: () -> Unit,
@@ -106,6 +110,48 @@ fun TiviMatePlayerScreen(
     var showLanguageDialog by remember { mutableStateOf(false) }
     var showQualityDialog by remember { mutableStateOf(false) }
     var zappingToastText by remember { mutableStateOf<String?>(null) }
+    var liveDelaySeconds by remember(channel?.id) { mutableLongStateOf(0L) }
+
+    val activeZapList = remember(categoryChannels, channelList) {
+        if (categoryChannels.isNotEmpty()) categoryChannels else channelList
+    }
+
+    val currentChannelIndex = remember(channel?.id, activeZapList) {
+        val idx = activeZapList.indexOfFirst { it.id == channel?.id }
+        if (idx >= 0) idx else 0
+    }
+
+    val playerFocusRequester = remember { FocusRequester() }
+    val actionButtonsFocusRequester = remember { FocusRequester() }
+    val sliderFocusRequester = remember { FocusRequester() }
+    val drawerFocusRequester = remember { FocusRequester() }
+    val drawerListState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+    // Timeshift / Live seeking logic
+    val onSeekBy: (Long) -> Unit = { deltaSec ->
+        player?.let { p ->
+            val newDelay = maxOf(0L, liveDelaySeconds - deltaSec)
+            liveDelaySeconds = newDelay
+            if (newDelay == 0L) {
+                try {
+                    p.seekToDefaultPosition()
+                } catch (_: Exception) {}
+            } else {
+                val currentPos = p.currentPosition
+                val targetPos = maxOf(0L, currentPos + (deltaSec * 1000L))
+                try {
+                    p.seekTo(targetPos)
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    val onGoLive: () -> Unit = {
+        liveDelaySeconds = 0L
+        try {
+            player?.seekToDefaultPosition()
+        } catch (_: Exception) {}
+    }
 
     // Live Recording Timer
     LaunchedEffect(isRecording) {
@@ -118,11 +164,32 @@ fun TiviMatePlayerScreen(
         }
     }
 
-    // Auto-hide infobar after 5 seconds of inactivity
+    // Auto-hide infobar after 8 seconds of inactivity
     LaunchedEffect(showInfobar, showLanguageDialog, showQualityDialog, showQuickChannelDrawer) {
         if (showInfobar && !showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
-            delay(5000)
+            delay(8000)
             showInfobar = false
+        }
+    }
+
+    // Auto-focus controls when infobar opens
+    LaunchedEffect(showInfobar) {
+        if (showInfobar) {
+            delay(120)
+            try {
+                actionButtonsFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
+
+    // Auto-focus quick channel drawer when opened
+    LaunchedEffect(showQuickChannelDrawer) {
+        if (showQuickChannelDrawer) {
+            delay(100)
+            try {
+                drawerListState.scrollToItem(maxOf(0, currentChannelIndex - 2))
+                drawerFocusRequester.requestFocus()
+            } catch (_: Exception) {}
         }
     }
 
@@ -138,26 +205,24 @@ fun TiviMatePlayerScreen(
         channel != null && favoriteChannels.any { it.id == channel.id }
     }
 
-    val currentChannelIndex = remember(channel, channelList) {
-        channelList.indexOfFirst { it.id == channel?.id }.coerceAtLeast(0)
-    }
-
-    // Instant Channel Zapping
+    // Instant Channel Zapping strictly within current section/category
     val zapNext = {
-        if (channelList.isNotEmpty()) {
-            val nextIndex = (currentChannelIndex + 1) % channelList.size
-            val nextCh = channelList[nextIndex]
+        if (activeZapList.isNotEmpty()) {
+            val nextIndex = (currentChannelIndex + 1) % activeZapList.size
+            val nextCh = activeZapList[nextIndex]
             onSwitchChannel(nextCh)
-            zappingToastText = "#${nextIndex + 1} ${nextCh.title}"
+            val catPrefix = if (currentCategoryName.isNotBlank() && currentCategoryName != "All channels") "[$currentCategoryName] " else ""
+            zappingToastText = "$catPrefix#${nextIndex + 1} ${nextCh.title}"
         }
     }
 
     val zapPrev = {
-        if (channelList.isNotEmpty()) {
-            val prevIndex = if (currentChannelIndex - 1 < 0) channelList.size - 1 else currentChannelIndex - 1
-            val prevCh = channelList[prevIndex]
+        if (activeZapList.isNotEmpty()) {
+            val prevIndex = if (currentChannelIndex - 1 < 0) activeZapList.size - 1 else currentChannelIndex - 1
+            val prevCh = activeZapList[prevIndex]
             onSwitchChannel(prevCh)
-            zappingToastText = "#${prevIndex + 1} ${prevCh.title}"
+            val catPrefix = if (currentCategoryName.isNotBlank() && currentCategoryName != "All channels") "[$currentCategoryName] " else ""
+            zappingToastText = "$catPrefix#${prevIndex + 1} ${prevCh.title}"
         }
     }
 
@@ -224,7 +289,6 @@ fun TiviMatePlayerScreen(
         }
     }
 
-    val playerFocusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) {
         delay(150)
         try {
@@ -244,51 +308,56 @@ fun TiviMatePlayerScreen(
             }
             .onPreviewKeyEvent { event ->
                 val action = event.nativeKeyEvent.action
-                if (action == KeyEvent.ACTION_DOWN || action == KeyEvent.ACTION_UP) {
-                    when (event.nativeKeyEvent.keyCode) {
-                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                            if (action == KeyEvent.ACTION_UP) {
-                                if (!showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
-                                    showInfobar = !showInfobar
-                                    true
-                                } else false
-                            } else true
+                val keyCode = event.nativeKeyEvent.keyCode
+                if (action == KeyEvent.ACTION_DOWN) {
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_MENU -> {
+                            if (!showLanguageDialog && !showQualityDialog) {
+                                showQuickChannelDrawer = !showQuickChannelDrawer
+                                showInfobar = false
+                                true
+                            } else false
                         }
-                        KeyEvent.KEYCODE_DPAD_DOWN -> {
-                            if (action == KeyEvent.ACTION_DOWN) {
-                                if (!showInfobar && !showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
-                                    showInfobar = true
-                                    true
-                                } else false
+                        KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
+                            zapNext()
+                            true
+                        }
+                        KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
+                            zapPrev()
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                            if (!showInfobar && !showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
+                                onBackToGuide()
+                                true
                             } else false
                         }
                         KeyEvent.KEYCODE_DPAD_UP -> {
-                            if (action == KeyEvent.ACTION_DOWN) {
-                                if (!showInfobar && !showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
-                                    zapNext()
-                                    true
-                                } else false
+                            if (!showInfobar && !showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
+                                showInfobar = true
+                                true
+                            } else false
+                        }
+                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            if (!showInfobar && !showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
+                                showInfobar = true
+                                true
                             } else false
                         }
                         KeyEvent.KEYCODE_DPAD_LEFT -> {
-                            if (action == KeyEvent.ACTION_DOWN) {
-                                if (!showQuickChannelDrawer && !showLanguageDialog && !showQualityDialog) {
-                                    showQuickChannelDrawer = true
-                                    showInfobar = false
-                                    true
-                                } else false
+                            if (!showInfobar && !showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
+                                showQuickChannelDrawer = true
+                                true
                             } else false
                         }
                         KeyEvent.KEYCODE_BACK -> {
-                            if (action == KeyEvent.ACTION_UP) {
-                                when {
-                                    showLanguageDialog -> { showLanguageDialog = false; true }
-                                    showQualityDialog -> { showQualityDialog = false; true }
-                                    showQuickChannelDrawer -> { showQuickChannelDrawer = false; true }
-                                    showInfobar -> { showInfobar = false; true }
-                                    else -> { onBackToGuide(); true }
-                                }
-                            } else true
+                            when {
+                                showLanguageDialog -> { showLanguageDialog = false; true }
+                                showQualityDialog -> { showQualityDialog = false; true }
+                                showQuickChannelDrawer -> { showQuickChannelDrawer = false; true }
+                                showInfobar -> { showInfobar = false; true }
+                                else -> { onBackToGuide(); true }
+                            }
                         }
                         else -> false
                     }
@@ -485,20 +554,39 @@ fun TiviMatePlayerScreen(
                                     }
                                 }
 
-                                // LIVE badge
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(TvColors.Danger)
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "LIVE",
-                                        color = Color.White,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Black,
-                                        fontFamily = TvFonts.Body
-                                    )
+                                // LIVE / TIME SHIFT badge
+                                if (liveDelaySeconds > 0L) {
+                                    val m = liveDelaySeconds / 60
+                                    val s = liveDelaySeconds % 60
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(TvColors.Warning)
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = String.format("-%02d:%02d", m, s),
+                                            color = Color.Black,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Black,
+                                            fontFamily = TvFonts.Body
+                                        )
+                                    }
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(TvColors.Danger)
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "LIVE",
+                                            color = Color.White,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Black,
+                                            fontFamily = TvFonts.Body
+                                        )
+                                    }
                                 }
                             }
 
@@ -526,21 +614,19 @@ fun TiviMatePlayerScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Progress Bar
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.5.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(Color.White.copy(alpha = 0.2f))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(0.62f)
-                            .fillMaxHeight()
-                            .background(TvColors.Focus)
-                    )
-                }
+                // Interactive Video Seek Slider
+                TiviMateSeekSlider(
+                    focusRequester = sliderFocusRequester,
+                    liveDelaySeconds = liveDelaySeconds,
+                    onSeekBy = onSeekBy,
+                    onGoLive = onGoLive,
+                    onNavigateDown = {
+                        try {
+                            actionButtonsFocusRequester.requestFocus()
+                        } catch (_: Exception) {}
+                    },
+                    onCloseControls = { showInfobar = false }
+                )
 
                 Spacer(modifier = Modifier.height(18.dp))
 
@@ -552,18 +638,25 @@ fun TiviMatePlayerScreen(
                     TiviMateActionButton(
                         icon = Icons.Rounded.Tv,
                         label = "TV guide",
+                        focusRequester = actionButtonsFocusRequester,
+                        onNavigateUp = { sliderFocusRequester.requestFocus() },
+                        onNavigateDown = { showInfobar = false },
                         onClick = onBackToGuide
                     )
 
                     TiviMateActionButton(
                         icon = Icons.Rounded.Language,
                         label = if (cleanPlayerLang.isNotBlank()) "Language ($cleanPlayerLang)" else "Language",
+                        onNavigateUp = { sliderFocusRequester.requestFocus() },
+                        onNavigateDown = { showInfobar = false },
                         onClick = { showLanguageDialog = true }
                     )
 
                     TiviMateActionButton(
                         icon = Icons.Rounded.HighQuality,
                         label = "Quality ($displayedQuality)",
+                        onNavigateUp = { sliderFocusRequester.requestFocus() },
+                        onNavigateDown = { showInfobar = false },
                         onClick = { showQualityDialog = true }
                     )
 
@@ -575,6 +668,8 @@ fun TiviMatePlayerScreen(
                             String.format("REC %02d:%02d", m, s)
                         } else "Record",
                         tint = if (isRecording) TvColors.Danger else Color.White,
+                        onNavigateUp = { sliderFocusRequester.requestFocus() },
+                        onNavigateDown = { showInfobar = false },
                         onClick = {
                             if (!isRecording) {
                                 isRecording = true
@@ -602,12 +697,16 @@ fun TiviMatePlayerScreen(
                         icon = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                         label = if (isFavorite) "Favorite" else "Add Favorite",
                         tint = if (isFavorite) TvColors.Danger else Color.White,
+                        onNavigateUp = { sliderFocusRequester.requestFocus() },
+                        onNavigateDown = { showInfobar = false },
                         onClick = { channel?.let(onToggleFavorite) }
                     )
 
                     TiviMateActionButton(
                         icon = Icons.AutoMirrored.Rounded.FormatListBulleted,
                         label = "Channels",
+                        onNavigateUp = { sliderFocusRequester.requestFocus() },
+                        onNavigateDown = { showInfobar = false },
                         onClick = { showQuickChannelDrawer = true }
                     )
                 }
@@ -637,7 +736,9 @@ fun TiviMatePlayerScreen(
                         .padding(start = 8.dp, end = 8.dp, bottom = 12.dp)
                 ) {
                     Text(
-                        text = "CHANNELS",
+                        text = if (currentCategoryName.isNotBlank() && currentCategoryName != "All channels") {
+                            "CHANNELS - ${currentCategoryName.uppercase()}"
+                        } else "CHANNELS",
                         color = TvColors.TextSecondary,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
@@ -663,10 +764,11 @@ fun TiviMatePlayerScreen(
                 }
 
                 LazyColumn(
+                    state = drawerListState,
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    itemsIndexed(channelList) { index, ch ->
+                    itemsIndexed(activeZapList) { index, ch ->
                         val isCurrent = ch.id == channel?.id
                         var isFocused by remember { mutableStateOf(false) }
 
@@ -689,10 +791,27 @@ fun TiviMatePlayerScreen(
                                     ),
                                     RoundedCornerShape(8.dp)
                                 )
+                                .then(if (index == currentChannelIndex) Modifier.focusRequester(drawerFocusRequester) else Modifier)
                                 .onFocusChanged { isFocused = it.isFocused }
                                 .clickable {
                                     onSwitchChannel(ch)
                                     showQuickChannelDrawer = false
+                                }
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                        when (keyEvent.nativeKeyEvent.keyCode) {
+                                            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                                                onSwitchChannel(ch)
+                                                showQuickChannelDrawer = false
+                                                true
+                                            }
+                                            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_BACK -> {
+                                                showQuickChannelDrawer = false
+                                                true
+                                            }
+                                            else -> false
+                                        }
+                                    } else false
                                 }
                                 .focusable()
                                 .padding(horizontal = 10.dp, vertical = 8.dp)
@@ -860,6 +979,9 @@ private fun TiviMateActionButton(
     icon: ImageVector,
     label: String,
     tint: Color = Color.White,
+    focusRequester: FocusRequester? = null,
+    onNavigateUp: (() -> Unit)? = null,
+    onNavigateDown: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -874,7 +996,27 @@ private fun TiviMateActionButton(
                 BorderStroke(1.2.dp, if (isFocused) TvColors.FocusGlow else TvColors.BorderSubtle),
                 RoundedCornerShape(8.dp)
             )
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { isFocused = it.isFocused }
+            .onPreviewKeyEvent { event ->
+                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                    when (event.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            if (onNavigateUp != null) {
+                                onNavigateUp()
+                                true
+                            } else false
+                        }
+                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            if (onNavigateDown != null) {
+                                onNavigateDown()
+                                true
+                            } else false
+                        }
+                        else -> false
+                    }
+                } else false
+            }
             .clickable { onClick() }
             .focusable()
             .padding(horizontal = 14.dp, vertical = 9.dp)
@@ -892,6 +1034,140 @@ private fun TiviMateActionButton(
             fontWeight = FontWeight.SemiBold,
             fontFamily = TvFonts.Body
         )
+    }
+}
+
+@Composable
+private fun TiviMateSeekSlider(
+    focusRequester: FocusRequester,
+    liveDelaySeconds: Long,
+    onSeekBy: (Long) -> Unit,
+    onGoLive: () -> Unit,
+    onNavigateDown: () -> Unit,
+    onCloseControls: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val isDelayed = liveDelaySeconds > 0L
+
+    val maxBufferSec = 300f
+    val fraction = if (!isDelayed) 1f else ((maxBufferSec - liveDelaySeconds.coerceAtMost(300L)) / maxBufferSec).coerceIn(0.05f, 1f)
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .focusRequester(focusRequester)
+            .onFocusChanged { isFocused = it.isFocused }
+            .onPreviewKeyEvent { event ->
+                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                    when (event.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            onSeekBy(-10L)
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            onSeekBy(10L)
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            onNavigateDown()
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                            if (isDelayed) {
+                                onGoLive()
+                            }
+                            true
+                        }
+                        KeyEvent.KEYCODE_BACK -> {
+                            onCloseControls()
+                            true
+                        }
+                        else -> false
+                    }
+                } else false
+            }
+            .focusable()
+            .padding(vertical = 4.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (isDelayed) {
+                    val m = liveDelaySeconds / 60
+                    val s = liveDelaySeconds % 60
+                    Text(
+                        text = String.format("-%02d:%02d", m, s),
+                        color = TvColors.Warning,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = TvFonts.Body
+                    )
+                    Text(
+                        text = "TIME SHIFT",
+                        color = TvColors.TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = TvFonts.Body
+                    )
+                } else {
+                    Text(
+                        text = "00:00",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = TvFonts.Body
+                    )
+                    Text(
+                        text = "LIVE",
+                        color = TvColors.Danger,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = TvFonts.Body
+                    )
+                }
+            }
+
+            if (isFocused) {
+                Text(
+                    text = if (isDelayed) "◀ -10s | +10s ▶ | Press OK for LIVE" else "◀ Press Left to Seek Back (-10s)",
+                    color = TvColors.FocusGlow,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    fontFamily = TvFonts.Body
+                )
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (isFocused) 8.dp else 4.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color.White.copy(alpha = 0.2f))
+                .border(
+                    BorderStroke(
+                        if (isFocused) 1.5.dp else 0.dp,
+                        if (isFocused) TvColors.FocusGlow else Color.Transparent
+                    ),
+                    RoundedCornerShape(4.dp)
+                )
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction)
+                    .fillMaxHeight()
+                    .background(if (isDelayed) TvColors.Warning else TvColors.Focus)
+            )
+        }
     }
 }
 

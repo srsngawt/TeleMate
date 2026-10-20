@@ -268,6 +268,9 @@ fun TiviMateGuideScreen(
     player: Player?,
     activeChannel: Channel?,
     currentProgrammes: Map<String, Programme>,
+    initialCategory: String = "All channels",
+    isGuideVisible: Boolean = true,
+    onCategoryChanged: (String) -> Unit = {},
     onPlayChannel: (Channel) -> Unit,
     onToggleFavorite: (Channel) -> Unit,
     onOpenFullscreen: () -> Unit,
@@ -291,8 +294,15 @@ fun TiviMateGuideScreen(
         list
     }
 
-    var selectedGroupIndex by remember { mutableIntStateOf(0) }
+    var selectedGroupIndex by remember(groups, initialCategory) {
+        val idx = groups.indexOfFirst { it.first.equals(initialCategory, ignoreCase = true) }
+        mutableIntStateOf(if (idx >= 0) idx else 0)
+    }
     val currentGroupName = groups.getOrNull(selectedGroupIndex)?.first ?: "All channels"
+
+    LaunchedEffect(currentGroupName) {
+        onCategoryChanged(currentGroupName)
+    }
 
     val displayedChannels = remember(unifiedChannels, currentGroupName, favoriteIds) {
         when (currentGroupName) {
@@ -356,15 +366,28 @@ fun TiviMateGuideScreen(
         label = "railWidth"
     )
 
-    // Initial screen mount focus (ONCE only - never auto-jump when browsing categories)
-    var hasInitialFocused by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay(200)
-        if (!hasInitialFocused) {
-            hasInitialFocused = true
-            try {
-                channelFocusRequester.requestFocus()
-            } catch (_: Exception) {}
+    // When TV Guide opens or isGuideVisible becomes true, automatically focus and scroll to the currently playing channel
+    var wasGuideVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(isGuideVisible, activeChannel?.id, displayedChannels) {
+        if (isGuideVisible && (!wasGuideVisible || focusedChannelIndex < 0)) {
+            wasGuideVisible = true
+            if (displayedChannels.isNotEmpty()) {
+                val playingIndex = if (activeChannel != null) {
+                    val found = displayedChannels.indexOfFirst { u ->
+                        u.variants.any { it.channel.id == activeChannel.id }
+                    }
+                    if (found >= 0) found else 0
+                } else 0
+
+                focusedChannelIndex = playingIndex
+                delay(120)
+                try {
+                    channelListState.scrollToItem(maxOf(0, playingIndex - 1))
+                    channelFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            }
+        } else if (!isGuideVisible) {
+            wasGuideVisible = false
         }
     }
 
@@ -383,6 +406,45 @@ fun TiviMateGuideScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(TvColors.Background)
+            .onPreviewKeyEvent { event ->
+                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                    when (event.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
+                            if (displayedChannels.isNotEmpty()) {
+                                val nextIndex = (focusedChannelIndex + 1) % displayedChannels.size
+                                focusedChannelIndex = nextIndex
+                                val nextItem = displayedChannels[nextIndex]
+                                val stream = nextItem.getStreamFor(
+                                    selectedLanguages[nextItem.id] ?: nextItem.defaultLanguage,
+                                    selectedQualities[nextItem.id] ?: nextItem.defaultQuality
+                                )
+                                onPlayChannel(stream)
+                                scope.launch {
+                                    channelListState.animateScrollToItem(maxOf(0, nextIndex - 1))
+                                }
+                            }
+                            true
+                        }
+                        KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
+                            if (displayedChannels.isNotEmpty()) {
+                                val prevIndex = if (focusedChannelIndex - 1 < 0) displayedChannels.size - 1 else focusedChannelIndex - 1
+                                focusedChannelIndex = prevIndex
+                                val prevItem = displayedChannels[prevIndex]
+                                val stream = prevItem.getStreamFor(
+                                    selectedLanguages[prevItem.id] ?: prevItem.defaultLanguage,
+                                    selectedQualities[prevItem.id] ?: prevItem.defaultQuality
+                                )
+                                onPlayChannel(stream)
+                                scope.launch {
+                                    channelListState.animateScrollToItem(maxOf(0, prevIndex - 1))
+                                }
+                            }
+                            true
+                        }
+                        else -> false
+                    }
+                } else false
+            }
     ) {
         // =========================================================================
         // 1. TIVIMATE FAR-LEFT EXPANDABLE NAVIGATION DRAWER
@@ -1180,6 +1242,36 @@ fun TiviMateGuideScreen(
                                         .onPreviewKeyEvent { event ->
                                             if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                                                 when (event.nativeKeyEvent.keyCode) {
+                                                    KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
+                                                        if (focusedChannelIndex + 1 < displayedChannels.size) {
+                                                            focusedChannelIndex++
+                                                            val nextItem = displayedChannels[focusedChannelIndex]
+                                                            val stream = nextItem.getStreamFor(
+                                                                selectedLanguages[nextItem.id] ?: nextItem.defaultLanguage,
+                                                                selectedQualities[nextItem.id] ?: nextItem.defaultQuality
+                                                            )
+                                                            onPlayChannel(stream)
+                                                            scope.launch {
+                                                                channelListState.animateScrollToItem(maxOf(0, focusedChannelIndex - 1))
+                                                            }
+                                                        }
+                                                        true
+                                                    }
+                                                    KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
+                                                        if (focusedChannelIndex - 1 >= 0) {
+                                                            focusedChannelIndex--
+                                                            val prevItem = displayedChannels[focusedChannelIndex]
+                                                            val stream = prevItem.getStreamFor(
+                                                                selectedLanguages[prevItem.id] ?: prevItem.defaultLanguage,
+                                                                selectedQualities[prevItem.id] ?: prevItem.defaultQuality
+                                                            )
+                                                            onPlayChannel(stream)
+                                                            scope.launch {
+                                                                channelListState.animateScrollToItem(maxOf(0, focusedChannelIndex - 1))
+                                                            }
+                                                        }
+                                                        true
+                                                    }
                                                     KeyEvent.KEYCODE_DPAD_LEFT -> {
                                                         categoryFocusRequester.requestFocus()
                                                         true
@@ -1312,14 +1404,17 @@ fun TiviMateGuideScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    items(timelineShows) { show ->
+                                    itemsIndexed(timelineShows) { slotIdx, show ->
                                         TiviMateProgramSlotCard(
                                             show = show,
                                             onSelect = {
                                                 focusedChannelIndex = index
                                                 onPlayChannel(streamChannel)
                                                 onOpenFullscreen()
-                                            }
+                                            },
+                                            onNavigateLeft = if (slotIdx == 0) {
+                                                { channelFocusRequester.requestFocus() }
+                                            } else null
                                         )
                                     }
                                 }
@@ -1387,7 +1482,8 @@ fun TiviMateGuideScreen(
 @Composable
 private fun TiviMateProgramSlotCard(
     show: TimelineShowSlot,
-    onSelect: () -> Unit
+    onSelect: () -> Unit,
+    onNavigateLeft: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val cardWidth = (show.durationMinutes * 3.5f).toInt().coerceIn(160, 360).dp
@@ -1414,12 +1510,20 @@ private fun TiviMateProgramSlotCard(
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onSelect() }
             .onPreviewKeyEvent { event ->
-                if ((event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN || event.nativeKeyEvent.action == KeyEvent.ACTION_UP) &&
-                    (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                     event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER)
-                ) {
-                    onSelect()
-                    true
+                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                    when (event.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                            onSelect()
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            if (onNavigateLeft != null) {
+                                onNavigateLeft()
+                                true
+                            } else false
+                        }
+                        else -> false
+                    }
                 } else false
             }
             .focusable()

@@ -36,6 +36,7 @@ object TvColors {
     val FocusGlow = Color(0xFF3B82F6)     // Subtle 1.5dp focus ring (clean, not neon)
     val Accent = Color(0xFF2563EB)        // Clean accent
     val Danger = Color(0xFFDC2626)        // Clean crimson (LIVE badge & Record)
+    val Warning = Color(0xFFF59E0B)       // Amber/Orange (Timeshift & status)
     val Success = Color(0xFF10B981)
 
     // Typography

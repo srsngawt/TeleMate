@@ -59,6 +59,7 @@ fun App(
     var destination by remember { mutableStateOf(TvDestination.Home) }
     var surface by remember { mutableStateOf(TvSurface.Browse) }
     var activeRecording by remember { mutableStateOf<TvRecording?>(null) }
+    var currentCategoryName by remember { mutableStateOf("All channels") }
     val closePlayer = {
         activeRecording = null
         surface = TvSurface.Browse
@@ -119,6 +120,9 @@ fun App(
             player = if (surface == TvSurface.Browse && activeRecording == null) player else null,
             activeChannel = currentChannel,
             currentProgrammes = state.currentProgrammes,
+            initialCategory = currentCategoryName,
+            isGuideVisible = surface == TvSurface.Browse,
+            onCategoryChanged = { currentCategoryName = it },
             onPlayChannel = { channel ->
                 activeRecording = null
                 viewModel.play(channel)
@@ -165,10 +169,23 @@ fun App(
                     onClose = closePlayer
                 )
             } else {
+                val categoryChannels = remember(state.channels, currentCategoryName, state.favorites) {
+                    val favIds = state.favorites.map { it.id }.toSet()
+                    val allUnified = TiviMateChannelParser.groupChannels(state.channels, favIds)
+                    val filtered = when (currentCategoryName) {
+                        "Favorites" -> allUnified.filter { it.isFavorite }
+                        "All channels" -> allUnified
+                        else -> allUnified.filter { it.category.equals(currentCategoryName, ignoreCase = true) }
+                    }
+                    filtered.map { it.variants.first().channel }
+                }
+
                 TiviMatePlayerScreen(
                     player = player,
                     channel = currentChannel,
                     channelList = state.channels,
+                    categoryChannels = categoryChannels,
+                    currentCategoryName = currentCategoryName,
                     favoriteChannels = state.favorites,
                     isPlaying = isPlaying,
                     onPlayPause = { viewModel.pauseOrContinue(!isPlaying) },
