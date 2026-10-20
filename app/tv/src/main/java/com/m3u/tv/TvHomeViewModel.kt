@@ -768,7 +768,7 @@ class TvHomeViewModel @Inject constructor(
                                 locale = sortLocale,
                             )
                         )
-                    if (playlists.isEmpty() && !hasAutoSubscribed) {
+                    if (!hasAutoSubscribed) {
                         hasAutoSubscribed = true
                         SubscriptionWorker.m3u(
                             workManager = workManager,

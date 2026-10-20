@@ -55,3 +55,13 @@
 -dontwarn org.apache.logging.log4j.message.MessageFactory
 -dontwarn org.apache.logging.log4j.spi.ExtendedLogger
 -dontwarn org.apache.logging.log4j.spi.ExtendedLoggerWrapper
+
+# Netty & Ktor reflection rules (prevents NoSuchMethodException on release)
+-keep class io.netty.** { *; }
+-keep interface io.netty.** { *; }
+-keep class io.ktor.** { *; }
+-keep interface io.ktor.** { *; }
+-keep class kotlin.reflect.jvm.internal.** { *; }
+-dontwarn io.netty.**
+-dontwarn io.ktor.**
+
