@@ -743,7 +743,12 @@ fun TiviMateGuideScreen(
                                 val detailProgramme = focusedUnifiedChannel
                                     .getStreamFor(activeLanguage, activeQuality)
                                     .relationId
-                                    ?.let { currentProgrammes[it] }
+                                    ?.let { relId ->
+                                        currentProgrammes[relId]
+                                            ?: relId.substringBefore('@').let { baseId ->
+                                                currentProgrammes["$baseId@HD"] ?: currentProgrammes["$baseId@SD"] ?: currentProgrammes[baseId]
+                                            }
+                                    }
                                 val detailTiming = programmeTiming(detailProgramme)
                                 val detailTitle = detailProgramme?.title?.takeIf { it.isNotBlank() }
                                 Text(
@@ -1291,6 +1296,9 @@ fun TiviMateGuideScreen(
                                     )
                                 }
                                 val programme = currentProgrammes[streamChannel.relationId]
+                                    ?: streamChannel.relationId?.substringBefore('@')?.let { baseId ->
+                                        currentProgrammes["$baseId@HD"] ?: currentProgrammes["$baseId@SD"] ?: currentProgrammes[baseId]
+                                    }
                                 val timelineShows = remember(item.baseName, item.category, programme) {
                                     getChannelTimelineShows(
                                         channelName = item.baseName,

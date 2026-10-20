@@ -213,7 +213,7 @@ fun TiviMatePlayerScreen(
 
     // Dynamic User-Selected Quality Override (persists across dialog opens)
     var userSelectedQuality by remember(channel?.id) { mutableStateOf<String?>(null) }
-    val displayedQuality = userSelectedQuality ?: detectedTrackQuality ?: activeQuality
+    val displayedQuality = userSelectedQuality ?: activeVariant?.quality?.takeIf { it.isNotBlank() } ?: detectedTrackQuality ?: activeQuality
 
     var currentTimeString by remember { mutableStateOf("") }
     LaunchedEffect(Unit) {

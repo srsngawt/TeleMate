@@ -816,28 +816,32 @@ class TvHomeViewModel @Inject constructor(
 
     private fun loadChannels(url: String) {
         loadChannelsJob?.cancel()
-        loadChannelsJob = viewModelScope.launch(Dispatchers.IO) {
+        loadChannelsJob = viewModelScope.launch {
             _state.update { it.copy(loadingChannels = true) }
-            val channels = channelRepository
-                .getByPlaylistUrl(url)
-                .filterNot { it.hidden }
-                .sortedWith(
-                    localeAwareComparator(
-                        primarySelector = Channel::category,
-                        secondarySelector = Channel::title,
-                        locale = sortLocale,
-                    )
-                )
-            _state.update { state ->
-                if (state.selectedPlaylist?.url == url) {
-                    state.copy(
-                        channels = channels,
-                        loadingChannels = false
-                    )
-                } else {
-                    state
+            channelRepository
+                .observeAllByPlaylistUrl(url)
+                .flowOn(Dispatchers.IO)
+                .collect { rawChannels ->
+                    val channels = rawChannels
+                        .filterNot { it.hidden }
+                        .sortedWith(
+                            localeAwareComparator(
+                                primarySelector = Channel::category,
+                                secondarySelector = Channel::title,
+                                locale = sortLocale,
+                            )
+                        )
+                    _state.update { state ->
+                        if (state.selectedPlaylist?.url == url) {
+                            state.copy(
+                                channels = channels,
+                                loadingChannels = false
+                            )
+                        } else {
+                            state
+                        }
+                    }
                 }
-            }
         }
     }
 

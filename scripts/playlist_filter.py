@@ -219,6 +219,15 @@ def main():
         extinf = ch["extinf"]
         prefix = extinf.split(",", 1)[0] if "," in extinf else extinf
         
+        # Ensure tvg-id is distinct per stream quality/variant so Room DB and EPG do not collide
+        if 'tvg-id="' in prefix:
+            def replace_tvg_id(match):
+                tid = match.group(1)
+                base = tid.split('@')[0]
+                lang_suffix = f"-{ch['language']}" if ch.get('language') else ""
+                return f'tvg-id="{base}{lang_suffix}@{quality}"'
+            prefix = re.sub(r'tvg-id="([^"]+)"', replace_tvg_id, prefix)
+
         # Build clean title with language and quality tag so TeleMate parser detects both
         parts = [ch["base_name"]]
         if ch["language"]:

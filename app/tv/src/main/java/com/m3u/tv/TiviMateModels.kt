@@ -86,7 +86,7 @@ object TiviMateChannelParser {
         "(?i)\\b(Hindi|English|Tamil|Telugu|Kannada|Malayalam|Bengali|Marathi|Punjabi|Gujarati|Urdu|Odia|Bhojpuri|Assamese|HIN|ENG|TAM|TEL|KAN|MAL|BEN|MAR|PUN|GUJ|URD)\\b"
     )
 
-    private val bracketRegex = Regex("[\\[(]([^\\])]+)[\\])]")
+    private val bracketRegex = Regex("[\\[(]([^\\])]*)[\\])]")
 
     fun parseChannel(channel: Channel): Triple<String, String, String> {
         val rawTitle = channel.title.trim()
@@ -132,7 +132,9 @@ object TiviMateChannelParser {
         val finalLanguage = detectedLanguage ?: ""
 
         cleanTitle = cleanTitle
+            .replace(Regex("[\\[(]\\s*[\\])]"), "")
             .replace(bracketRegex, "")
+            .replace(Regex("[\\[\\]()]"), "")
             .replace(Regex("[-|_|:|/]+"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
