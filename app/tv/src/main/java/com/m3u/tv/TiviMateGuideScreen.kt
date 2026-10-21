@@ -474,6 +474,8 @@ fun TiviMateGuideScreen(
 
     // Focus Requesters for clean TV Navigation between columns
     val railFocusRequester = remember { FocusRequester() }
+    val searchRailFocusRequester = remember { FocusRequester() }
+    val searchBarFocusRequester = remember { FocusRequester() }
     val categoryFocusRequester = remember { FocusRequester() }
     val categoryFocusRequesters = remember { mutableMapOf<Int, FocusRequester>() }
     val channelFocusRequester = remember { FocusRequester() }
@@ -550,7 +552,7 @@ fun TiviMateGuideScreen(
     Row(
         modifier = Modifier
             .fillMaxSize()
-            .focusProperties { canFocus = isGuideVisible && !showSearchOverlay && !showRecordingsDialog && !showSettingsDialog }
+            .focusProperties { canFocus = isGuideVisible && !showRecordingsDialog && !showSettingsDialog }
             .background(TvColors.Background)
             .onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
@@ -649,9 +651,25 @@ fun TiviMateGuideScreen(
                     label = "Search",
                     isSelected = showSearchOverlay,
                     isExpanded = isRailFocused,
-                    focusRequester = null,
-                    onClick = { showSearchOverlay = true },
-                    onNavigateRight = { categoryFocusRequester.requestFocus() },
+                    focusRequester = searchRailFocusRequester,
+                    onClick = {
+                        showSearchOverlay = true
+                        scope.launch {
+                            delay(50)
+                            try {
+                                searchBarFocusRequester.requestFocus()
+                            } catch (_: Exception) {}
+                        }
+                    },
+                    onNavigateRight = {
+                        showSearchOverlay = true
+                        scope.launch {
+                            delay(50)
+                            try {
+                                searchBarFocusRequester.requestFocus()
+                            } catch (_: Exception) {}
+                        }
+                    },
                     onFocusChange = {
                         if (it) focusedRailItemIndex = 0
                         else if (focusedRailItemIndex == 0) focusedRailItemIndex = -1
@@ -666,6 +684,7 @@ fun TiviMateGuideScreen(
                     isExpanded = isRailFocused,
                     focusRequester = railFocusRequester,
                     onClick = {
+                        showSearchOverlay = false
                         selectedGroupIndex = 0
                         focusedChannelIndex = 0
                         scope.launch {
@@ -675,6 +694,9 @@ fun TiviMateGuideScreen(
                         }
                     },
                     onNavigateRight = {
+                        if (showSearchOverlay) {
+                            showSearchOverlay = false
+                        }
                         val targetIdx = selectedGroupIndex.coerceAtLeast(0)
                         categoryFocusRequesters[targetIdx]?.requestFocus() ?: categoryFocusRequester.requestFocus()
                     },
@@ -692,6 +714,7 @@ fun TiviMateGuideScreen(
                     isExpanded = isRailFocused,
                     focusRequester = null,
                     onClick = {
+                        showSearchOverlay = false
                         val idx = groups.indexOfFirst { it.first == "Favorites" }
                         if (idx >= 0) {
                             selectedGroupIndex = idx
@@ -706,6 +729,7 @@ fun TiviMateGuideScreen(
                         }
                     },
                     onNavigateRight = {
+                        showSearchOverlay = false
                         val idx = groups.indexOfFirst { it.first == "Favorites" }
                         if (idx >= 0) {
                             selectedGroupIndex = idx
@@ -732,8 +756,14 @@ fun TiviMateGuideScreen(
                     isSelected = showRecordingsDialog,
                     isExpanded = isRailFocused,
                     focusRequester = null,
-                    onClick = { showRecordingsDialog = true },
-                    onNavigateRight = { categoryFocusRequester.requestFocus() },
+                    onClick = {
+                        showSearchOverlay = false
+                        showRecordingsDialog = true
+                    },
+                    onNavigateRight = {
+                        showSearchOverlay = false
+                        categoryFocusRequester.requestFocus()
+                    },
                     onFocusChange = {
                         if (it) focusedRailItemIndex = 3
                         else if (focusedRailItemIndex == 3) focusedRailItemIndex = -1
@@ -747,8 +777,14 @@ fun TiviMateGuideScreen(
                     isSelected = showSettingsDialog,
                     isExpanded = isRailFocused,
                     focusRequester = null,
-                    onClick = { showSettingsDialog = true },
-                    onNavigateRight = { categoryFocusRequester.requestFocus() },
+                    onClick = {
+                        showSearchOverlay = false
+                        showSettingsDialog = true
+                    },
+                    onNavigateRight = {
+                        showSearchOverlay = false
+                        categoryFocusRequester.requestFocus()
+                    },
                     onFocusChange = {
                         if (it) focusedRailItemIndex = 4
                         else if (focusedRailItemIndex == 4) focusedRailItemIndex = -1
@@ -760,15 +796,41 @@ fun TiviMateGuideScreen(
         }
 
         // =========================================================================
-        // MAIN BODY: TOP PREVIEW & DETAILS + BOTTOM TIMELINE & CHANNELS
+        // MAIN BODY: SEARCH SCREEN OR (TOP PREVIEW & DETAILS + BOTTOM TIMELINE & CHANNELS)
         // =========================================================================
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
         ) {
-            // TOP SECTION: LIVE TV PREVIEW (LEFT) + PROGRAM & CHANNEL DETAILS (RIGHT)
-            Row(
+            if (showSearchOverlay) {
+                TiviMateSearchScreen(
+                    allChannels = unifiedChannels,
+                    searchBarFocusRequester = searchBarFocusRequester,
+                    onNavigateLeftToRail = {
+                        searchRailFocusRequester.requestFocus()
+                    },
+                    onSelectChannel = { channel ->
+                        showSearchOverlay = false
+                        val groupIdx = groups.indexOfFirst {
+                            it.first.equals(channel.category, ignoreCase = true)
+                        }.takeIf { it >= 0 } ?: 0
+                        selectedGroupIndex = groupIdx
+                        val stream = channel.getStreamFor(
+                            selectedLanguages[channel.id] ?: channel.defaultLanguage,
+                            selectedQualities[channel.id] ?: channel.defaultQuality
+                        )
+                        onPlayChannel(stream)
+                        onOpenFullscreen()
+                    },
+                    onClose = {
+                        showSearchOverlay = false
+                        searchRailFocusRequester.requestFocus()
+                    }
+                )
+            } else {
+                // TOP SECTION: LIVE TV PREVIEW (LEFT) + PROGRAM & CHANNEL DETAILS (RIGHT)
+                Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(0.40f)
@@ -1324,35 +1386,10 @@ fun TiviMateGuideScreen(
                     }
                 }
             }
+            }
         }
     }
 }
-
-    // =========================================================================
-    // SEARCH DIALOG OVERLAY (Triggered from Far-Left Rail Search Icon)
-    // =========================================================================
-    if (showSearchOverlay) {
-        TiviMateSearchDialog(
-            allChannels = unifiedChannels,
-            onSelectChannel = { channel ->
-                showSearchOverlay = false
-                val groupIdx = groups.indexOfFirst {
-                    it.first.equals(channel.category, ignoreCase = true)
-                }.takeIf { it >= 0 } ?: 0
-                selectedGroupIndex = groupIdx
-                val stream = channel.getStreamFor(
-                    selectedLanguages[channel.id] ?: channel.defaultLanguage,
-                    selectedQualities[channel.id] ?: channel.defaultQuality
-                )
-                onPlayChannel(stream)
-                onOpenFullscreen()
-            },
-            onDismiss = {
-                showSearchOverlay = false
-                railFocusRequester.requestFocus()
-            }
-        )
-    }
 
     // =========================================================================
     // RECORDINGS & SETTINGS DIALOGS
@@ -1798,19 +1835,19 @@ private fun TiviMateNavItem(
 }
 
 @Composable
-private fun TiviMateSearchDialog(
+private fun TiviMateSearchScreen(
     allChannels: List<UnifiedChannel>,
+    searchBarFocusRequester: FocusRequester,
+    onNavigateLeftToRail: () -> Unit,
     onSelectChannel: (UnifiedChannel) -> Unit,
-    onDismiss: () -> Unit
+    onClose: () -> Unit
 ) {
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
     var searchQuery by remember { mutableStateOf("") }
     var isEditing by remember { mutableStateOf(false) }
 
-    val rootFocusRequester = remember { FocusRequester() }
     val micFocusRequester = remember { FocusRequester() }
-    val searchBoxFocusRequester = remember { FocusRequester() }
     val closeButtonFocusRequester = remember { FocusRequester() }
     val textFieldFocusRequester = remember { FocusRequester() }
     val firstResultFocusRequester = remember { FocusRequester() }
@@ -1858,7 +1895,9 @@ private fun TiviMateSearchDialog(
 
             override fun onBufferReceived(buffer: ByteArray?) {}
 
-            override fun onEndOfSpeech() {}
+            override fun onEndOfSpeech() {
+                isListening = false
+            }
 
             override fun onError(error: Int) {
                 isListening = false
@@ -1873,10 +1912,10 @@ private fun TiviMateSearchDialog(
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission required."
                     SpeechRecognizer.ERROR_NETWORK -> "Network error for voice search."
                     SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout."
-                    SpeechRecognizer.ERROR_NO_MATCH -> "No speech recognized. Please speak clearly into remote."
+                    SpeechRecognizer.ERROR_NO_MATCH -> "No speech recognized. Speak into mic."
                     SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Voice recognizer is busy, please retry."
                     SpeechRecognizer.ERROR_SERVER -> "Voice server error."
-                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech heard. Speak closer to remote mic."
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech heard. Speak closer to mic."
                     else -> "Speech recognition error ($error)"
                 }
                 if (msg.isNotEmpty()) {
@@ -1886,7 +1925,7 @@ private fun TiviMateSearchDialog(
 
             override fun onResults(results: Bundle?) {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val spokenText = matches?.firstOrNull()?.trim()
+                val spokenText = matches?.firstOrNull { it.isNotBlank() }?.trim()
                 if (!spokenText.isNullOrBlank()) {
                     searchQuery = spokenText
                     isEditing = false
@@ -1900,7 +1939,7 @@ private fun TiviMateSearchDialog(
 
             override fun onPartialResults(partialResults: Bundle?) {
                 val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val spokenText = matches?.firstOrNull()?.trim()
+                val spokenText = matches?.firstOrNull { it.isNotBlank() }?.trim()
                 if (!spokenText.isNullOrBlank()) {
                     searchQuery = spokenText
                 }
@@ -1933,7 +1972,7 @@ private fun TiviMateSearchDialog(
                 } catch (_: Exception) {}
                 speechRecognizer = null
 
-                val recognizer = SpeechRecognizer.createSpeechRecognizer(context).also {
+                val recognizer = SpeechRecognizer.createSpeechRecognizer(context.applicationContext ?: context).also {
                     speechRecognizer = it
                 }
                 recognizer.setRecognitionListener(recognitionListener)
@@ -1943,11 +1982,10 @@ private fun TiviMateSearchDialog(
                         RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
                     )
                     putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 6000L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 6000L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3000L)
                 }
                 searchQuery = ""
                 isListening = true
@@ -1959,7 +1997,7 @@ private fun TiviMateSearchDialog(
         }
     }
 
-    // Permission launcher for YouTube-style voice permission dialog
+    // Permission launcher for voice permission dialog
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -1990,7 +2028,7 @@ private fun TiviMateSearchDialog(
         }
     }
 
-    // EMPTY IF SEARCH QUERY IS BLANK — Exactly as requested by user!
+    // Filter channels based on search query
     val filteredChannels = remember(searchQuery, allChannels) {
         if (searchQuery.trim().isEmpty()) {
             emptyList()
@@ -2003,11 +2041,11 @@ private fun TiviMateSearchDialog(
         }
     }
 
-    // Initial state: Request focus directly on search box
+    // Initial focus directly on search box
     LaunchedEffect(Unit) {
         delay(100)
         try {
-            searchBoxFocusRequester.requestFocus()
+            searchBarFocusRequester.requestFocus()
         } catch (_: Exception) {}
     }
 
@@ -2022,157 +2060,160 @@ private fun TiviMateSearchDialog(
         }
     }
 
-    // When listening to voice, Back cancels listening and stays in the Search dialog
+    // 1. When listening to voice, Back cancels listening
     BackHandler(enabled = isListening) {
         stopVoiceSearch()
     }
 
-    // When soft keyboard is open, Back closes the keyboard and stays in the Search dialog
+    // 2. When soft keyboard is open, Back closes the keyboard and returns focus to search box
     BackHandler(enabled = isEditing && !isListening) {
         keyboardController?.hide()
         isEditing = false
         try {
-            searchBoxFocusRequester.requestFocus()
+            searchBarFocusRequester.requestFocus()
         } catch (_: Exception) {}
     }
 
-    // When soft keyboard is closed and not listening, Back closes the Search dialog
+    // 3. When in search screen, Back closes search, resets query, and returns focus to Left Rail
     BackHandler(enabled = !isEditing && !isListening) {
-        onDismiss()
+        searchQuery = ""
+        onClose()
     }
 
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .background(TvColors.Background)
+            .padding(horizontal = 24.dp, vertical = 20.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 48.dp, vertical = 28.dp)
+        // TOP SEARCH CONTROLS ROW: [ Mic Button ] [ Search Text Box ] [ Clear / Close Button ]
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            // Header
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Search,
-                        contentDescription = "Search",
-                        tint = TvColors.Focus,
-                        modifier = Modifier.size(28.dp)
-                    )
-                    Text(
-                        text = "Search Channels",
-                        color = Color.White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = TvFonts.Body
-                    )
-                }
+            // 1. Mic Button (LEFT SIDE)
+            val micBg = if (isListening) {
+                TvColors.Danger.copy(alpha = pulseAlpha)
+            } else if (isMicFocused) {
+                TvColors.Focus
+            } else {
+                TvColors.SurfaceRaised
+            }
 
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (isCloseFocused) TvColors.Danger else TvColors.SurfaceRaised
-                        )
-                        .border(
-                            BorderStroke(
-                                if (isCloseFocused) 2.dp else 1.dp,
-                                if (isCloseFocused) Color.White else TvColors.BorderSubtle
-                            ),
-                            CircleShape
-                        )
-                        .focusRequester(closeButtonFocusRequester)
-                        .onFocusChanged { isCloseFocused = it.isFocused }
-                        .clickable { onDismiss() }
-                        .onPreviewKeyEvent { event ->
-                            if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+            val micBorder = if (isListening) {
+                BorderStroke(2.dp, Color.White)
+            } else if (isMicFocused) {
+                BorderStroke(1.5.dp, TvColors.FocusGlow)
+            } else {
+                BorderStroke(1.dp, TvColors.BorderSubtle)
+            }
+
+            val micTint = if (isListening || isMicFocused) Color.White else TvColors.Accent
+
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(micBg)
+                    .border(micBorder, RoundedCornerShape(10.dp))
+                    .focusRequester(micFocusRequester)
+                    .onFocusChanged { isMicFocused = it.isFocused }
+                    .clickable { onMicClick() }
+                    .onPreviewKeyEvent { event ->
+                        if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                            when (event.nativeKeyEvent.keyCode) {
+                                KeyEvent.KEYCODE_DPAD_CENTER,
+                                KeyEvent.KEYCODE_ENTER -> {
+                                    onMicClick()
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                    onNavigateLeftToRail()
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                    searchBarFocusRequester.requestFocus()
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                    if (filteredChannels.isNotEmpty()) {
+                                        firstResultFocusRequester.requestFocus()
+                                        true
+                                    } else false
+                                }
+                                else -> false
+                            }
+                        } else false
+                    }
+                    .focusable()
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Mic,
+                    contentDescription = "Voice Search",
+                    tint = micTint,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            // 2. Search Text Box (CENTER)
+            val searchBoxBorder = if (isListening) {
+                BorderStroke(1.5.dp, TvColors.Danger.copy(alpha = pulseAlpha))
+            } else if (isSearchBoxFocused || isEditing) {
+                BorderStroke(1.5.dp, TvColors.FocusGlow)
+            } else {
+                BorderStroke(1.dp, TvColors.BorderSubtle)
+            }
+
+            Box(
+                contentAlignment = Alignment.CenterStart,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(TvColors.BackgroundSoft)
+                    .border(searchBoxBorder, RoundedCornerShape(10.dp))
+                    .focusRequester(searchBarFocusRequester)
+                    .onFocusChanged { isSearchBoxFocused = it.isFocused }
+                    .clickable {
+                        if (isListening) stopVoiceSearch()
+                        isEditing = true
+                    }
+                    .onPreviewKeyEvent { event ->
+                        if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                            if (isEditing) {
                                 when (event.nativeKeyEvent.keyCode) {
-                                    KeyEvent.KEYCODE_DPAD_CENTER,
-                                    KeyEvent.KEYCODE_ENTER -> {
-                                        onDismiss()
+                                    KeyEvent.KEYCODE_BACK -> {
+                                        keyboardController?.hide()
+                                        isEditing = false
+                                        searchBarFocusRequester.requestFocus()
                                         true
                                     }
-                                    KeyEvent.KEYCODE_DPAD_DOWN,
-                                    KeyEvent.KEYCODE_DPAD_LEFT -> {
-                                        searchBoxFocusRequester.requestFocus()
-                                        true
+                                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                        if (filteredChannels.isNotEmpty()) {
+                                            keyboardController?.hide()
+                                            isEditing = false
+                                            firstResultFocusRequester.requestFocus()
+                                            true
+                                        } else false
                                     }
                                     else -> false
                                 }
-                            } else false
-                        }
-                        .focusable()
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "Close",
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Search input field with Mic Button (MIC ON THE LEFT, SEARCH BOX ON THE RIGHT)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                // 1. Voice Search Mic Button (LEFT SIDE)
-                val micBg = if (isListening) {
-                    TvColors.Danger.copy(alpha = pulseAlpha)
-                } else if (isMicFocused) {
-                    TvColors.Focus
-                } else {
-                    TvColors.SurfaceRaised
-                }
-
-                val micBorder = if (isListening) {
-                    BorderStroke(2.dp, Color.White)
-                } else if (isMicFocused) {
-                    BorderStroke(1.5.dp, TvColors.FocusGlow)
-                } else {
-                    BorderStroke(1.dp, TvColors.BorderSubtle)
-                }
-
-                val micTint = if (isListening || isMicFocused) Color.White else TvColors.Accent
-
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(micBg)
-                        .border(micBorder, RoundedCornerShape(10.dp))
-                        .focusRequester(micFocusRequester)
-                        .onFocusChanged { isMicFocused = it.isFocused }
-                        .clickable { onMicClick() }
-                        .onPreviewKeyEvent { event ->
-                            if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                            } else {
                                 when (event.nativeKeyEvent.keyCode) {
-                                    KeyEvent.KEYCODE_DPAD_CENTER,
-                                    KeyEvent.KEYCODE_ENTER -> {
-                                        onMicClick()
+                                    KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                        micFocusRequester.requestFocus()
                                         true
                                     }
                                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                                        searchBoxFocusRequester.requestFocus()
+                                        closeButtonFocusRequester.requestFocus()
                                         true
                                     }
-                                    KeyEvent.KEYCODE_DPAD_UP -> {
-                                        closeButtonFocusRequester.requestFocus()
+                                    KeyEvent.KEYCODE_DPAD_CENTER,
+                                    KeyEvent.KEYCODE_ENTER -> {
+                                        if (isListening) stopVoiceSearch()
+                                        isEditing = true
                                         true
                                     }
                                     KeyEvent.KEYCODE_DPAD_DOWN -> {
@@ -2183,352 +2224,325 @@ private fun TiviMateSearchDialog(
                                     }
                                     else -> false
                                 }
-                            } else false
+                            }
+                        } else false
+                    }
+                    .focusable()
+                    .padding(horizontal = 14.dp)
+            ) {
+                if (isEditing) {
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontFamily = TvFonts.Body
+                        ),
+                        cursorBrush = SolidColor(TvColors.Focus),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(
+                            onSearch = {
+                                keyboardController?.hide()
+                                isEditing = false
+                                searchBarFocusRequester.requestFocus()
+                            },
+                            onDone = {
+                                keyboardController?.hide()
+                                isEditing = false
+                                searchBarFocusRequester.requestFocus()
+                            }
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(textFieldFocusRequester),
+                        decorationBox = { innerTextField ->
+                            Box(contentAlignment = Alignment.CenterStart) {
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        text = "Type channel or category name...",
+                                        color = TvColors.TextMuted,
+                                        fontSize = 15.sp,
+                                        fontFamily = TvFonts.Body
+                                    )
+                                }
+                                innerTextField()
+                            }
                         }
-                        .focusable()
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Mic,
-                        contentDescription = "Voice Search",
-                        tint = micTint,
-                        modifier = Modifier.size(24.dp)
+                    )
+                } else if (isListening) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = if (searchQuery.isEmpty()) "Speak now..." else searchQuery,
+                            color = if (searchQuery.isEmpty()) TvColors.Danger else Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = TvFonts.Body
+                        )
+                    }
+                } else {
+                    Text(
+                        text = if (searchQuery.isEmpty()) "Type channel or category name..." else searchQuery,
+                        color = if (searchQuery.isEmpty()) TvColors.TextMuted else Color.White,
+                        fontSize = 15.sp,
+                        fontFamily = TvFonts.Body
                     )
                 }
+            }
 
-                // 2. Search Text Box (RIGHT SIDE OF MIC)
-                val searchBoxBorder = if (isListening) {
-                    BorderStroke(1.5.dp, TvColors.Danger.copy(alpha = pulseAlpha))
-                } else if (isSearchBoxFocused || isEditing) {
-                    BorderStroke(1.5.dp, TvColors.FocusGlow)
-                } else {
-                    BorderStroke(1.dp, TvColors.BorderSubtle)
-                }
+            // 3. Clear / Close Button (RIGHT SIDE)
+            val closeBg = if (isCloseFocused) TvColors.Danger else TvColors.SurfaceRaised
+            val closeBorder = if (isCloseFocused) {
+                BorderStroke(1.5.dp, Color.White)
+            } else {
+                BorderStroke(1.dp, TvColors.BorderSubtle)
+            }
 
-                Box(
-                    contentAlignment = Alignment.CenterStart,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(TvColors.BackgroundSoft)
-                        .border(searchBoxBorder, RoundedCornerShape(10.dp))
-                        .focusRequester(searchBoxFocusRequester)
-                        .onFocusChanged { isSearchBoxFocused = it.isFocused }
-                        .clickable {
-                            if (isListening) stopVoiceSearch()
-                            isEditing = true
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(closeBg)
+                    .border(closeBorder, RoundedCornerShape(10.dp))
+                    .focusRequester(closeButtonFocusRequester)
+                    .onFocusChanged { isCloseFocused = it.isFocused }
+                    .clickable {
+                        if (searchQuery.isNotEmpty()) {
+                            searchQuery = ""
+                            searchBarFocusRequester.requestFocus()
+                        } else {
+                            onClose()
                         }
-                        .onPreviewKeyEvent { event ->
-                            if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                                if (isEditing) {
+                    }
+                    .onPreviewKeyEvent { event ->
+                        if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                            when (event.nativeKeyEvent.keyCode) {
+                                KeyEvent.KEYCODE_DPAD_CENTER,
+                                KeyEvent.KEYCODE_ENTER -> {
+                                    if (searchQuery.isNotEmpty()) {
+                                        searchQuery = ""
+                                        searchBarFocusRequester.requestFocus()
+                                    } else {
+                                        onClose()
+                                    }
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                    searchBarFocusRequester.requestFocus()
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                    if (filteredChannels.isNotEmpty()) {
+                                        firstResultFocusRequester.requestFocus()
+                                        true
+                                    } else false
+                                }
+                                else -> false
+                            }
+                        } else false
+                    }
+                    .focusable()
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Close,
+                    contentDescription = "Clear or Close",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Results count or Empty State Hint
+        if (searchQuery.trim().isEmpty()) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(TvColors.SurfaceRaised)
+                            .border(BorderStroke(1.dp, TvColors.BorderSubtle), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Mic,
+                            contentDescription = null,
+                            tint = if (isListening) TvColors.Danger else TvColors.Focus,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    Text(
+                        text = if (isListening) "Listening... Speak channel name now" else "Type channel name or press Mic to speak",
+                        color = if (isListening) TvColors.Danger else TvColors.TextMuted,
+                        fontSize = 14.sp,
+                        fontWeight = if (isListening) FontWeight.SemiBold else FontWeight.Normal,
+                        fontFamily = TvFonts.Body
+                    )
+                }
+            }
+        } else if (filteredChannels.isEmpty()) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                Text(
+                    text = "No channels found for \"$searchQuery\"",
+                    color = TvColors.TextSecondary,
+                    fontSize = 14.sp,
+                    fontFamily = TvFonts.Body
+                )
+            }
+        } else {
+            Text(
+                text = "${filteredChannels.size} channels found",
+                color = TvColors.TextSecondary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                fontFamily = TvFonts.Body,
+                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+            )
+
+            // Results list
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                itemsIndexed(filteredChannels) { index, channel ->
+                    var isItemFocused by remember { mutableStateOf(false) }
+
+                    val itemModifier = if (index == 0) {
+                        Modifier.focusRequester(firstResultFocusRequester)
+                    } else Modifier
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = itemModifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (isItemFocused) TvColors.Focus else TvColors.SurfaceRaised
+                            )
+                            .border(
+                                BorderStroke(
+                                    if (isItemFocused) 1.5.dp else 1.dp,
+                                    if (isItemFocused) TvColors.FocusGlow else TvColors.BorderSubtle
+                                ),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .onFocusChanged { isItemFocused = it.isFocused }
+                            .clickable { onSelectChannel(channel) }
+                            .onPreviewKeyEvent { event ->
+                                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                                     when (event.nativeKeyEvent.keyCode) {
-                                        KeyEvent.KEYCODE_BACK -> {
-                                            keyboardController?.hide()
-                                            isEditing = false
-                                            searchBoxFocusRequester.requestFocus()
-                                            true
-                                        }
-                                        KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                            if (filteredChannels.isNotEmpty()) {
-                                                keyboardController?.hide()
-                                                isEditing = false
-                                                firstResultFocusRequester.requestFocus()
+                                        KeyEvent.KEYCODE_DPAD_UP -> {
+                                            if (index == 0) {
+                                                searchBarFocusRequester.requestFocus()
                                                 true
                                             } else false
                                         }
-                                        else -> false
-                                    }
-                                } else {
-                                    when (event.nativeKeyEvent.keyCode) {
                                         KeyEvent.KEYCODE_DPAD_LEFT -> {
-                                            micFocusRequester.requestFocus()
-                                            true
-                                        }
-                                        KeyEvent.KEYCODE_DPAD_UP -> {
-                                            closeButtonFocusRequester.requestFocus()
+                                            onNavigateLeftToRail()
                                             true
                                         }
                                         KeyEvent.KEYCODE_DPAD_CENTER,
                                         KeyEvent.KEYCODE_ENTER -> {
-                                            if (isListening) stopVoiceSearch()
-                                            isEditing = true
+                                            onSelectChannel(channel)
                                             true
-                                        }
-                                        KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                            if (filteredChannels.isNotEmpty()) {
-                                                firstResultFocusRequester.requestFocus()
-                                                true
-                                            } else false
                                         }
                                         else -> false
                                     }
-                                }
-                            } else false
-                        }
-                        .focusable()
-                        .padding(horizontal = 16.dp)
-                ) {
-                    if (isEditing) {
-                        BasicTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            singleLine = true,
-                            textStyle = TextStyle(
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontFamily = TvFonts.Body
-                            ),
-                            cursorBrush = SolidColor(TvColors.Focus),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(
-                                onSearch = {
-                                    keyboardController?.hide()
-                                    isEditing = false
-                                    searchBoxFocusRequester.requestFocus()
-                                },
-                                onDone = {
-                                    keyboardController?.hide()
-                                    isEditing = false
-                                    searchBoxFocusRequester.requestFocus()
-                                }
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .focusRequester(textFieldFocusRequester),
-                            decorationBox = { innerTextField ->
-                                Box(contentAlignment = Alignment.CenterStart) {
-                                    if (searchQuery.isEmpty()) {
-                                        Text(
-                                            text = "Type channel or category name...",
-                                            color = TvColors.TextMuted,
-                                            fontSize = 15.sp,
-                                            fontFamily = TvFonts.Body
-                                        )
-                                    }
-                                    innerTextField()
-                                }
+                                } else false
                             }
-                        )
-                    } else if (isListening) {
+                            .focusable()
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                    ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
                         ) {
-                            if (searchQuery.isEmpty()) {
+                            // Logo
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(TvColors.Background)
+                            ) {
+                                if (!channel.cover.isNullOrEmpty()) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(channel.cover)
+                                            .size(96, 96)
+                                            .crossfade(false)
+                                            .build(),
+                                        contentDescription = channel.baseName,
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Tv,
+                                        contentDescription = null,
+                                        tint = TvColors.TextMuted,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+
+                            Column {
                                 Text(
-                                    text = "Speak now...",
-                                    color = TvColors.Danger,
-                                    fontSize = 15.sp,
+                                    text = channel.baseName,
+                                    color = Color.White,
+                                    fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold,
+                                    fontFamily = TvFonts.Body,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = channel.category,
+                                    color = if (isItemFocused) Color.White.copy(alpha = 0.8f) else TvColors.TextSecondary,
+                                    fontSize = 11.sp,
                                     fontFamily = TvFonts.Body
                                 )
-                            } else {
+                            }
+                        }
+
+                        // Badges
+                        val lang = channel.defaultLanguage
+                        if (lang.isNotBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (isItemFocused) Color.Black.copy(alpha = 0.3f) else TvColors.BadgeBackground)
+                                    .padding(horizontal = 6.dp, vertical = 3.dp)
+                            ) {
                                 Text(
-                                    text = searchQuery,
-                                    color = Color.White,
-                                    fontSize = 15.sp,
+                                    text = lang,
+                                    color = if (isItemFocused) Color.White else TvColors.Accent,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = TvFonts.Body
                                 )
-                            }
-                        }
-                    } else {
-                        if (searchQuery.isEmpty()) {
-                            Text(
-                                text = "Type channel or category name...",
-                                color = TvColors.TextMuted,
-                                fontSize = 15.sp,
-                                fontFamily = TvFonts.Body
-                            )
-                        } else {
-                            Text(
-                                text = searchQuery,
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontFamily = TvFonts.Body
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Results count or Empty State Hint
-            if (searchQuery.trim().isEmpty()) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(56.dp)
-                                .clip(CircleShape)
-                                .background(TvColors.SurfaceRaised)
-                                .border(BorderStroke(1.dp, TvColors.BorderSubtle), CircleShape)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Mic,
-                                contentDescription = null,
-                                tint = if (isListening) TvColors.Danger else TvColors.Focus,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                        Text(
-                            text = if (isListening) "Listening... Speak channel name now" else "Type channel name or press Mic to speak",
-                            color = if (isListening) TvColors.Danger else TvColors.TextMuted,
-                            fontSize = 14.sp,
-                            fontWeight = if (isListening) FontWeight.SemiBold else FontWeight.Normal,
-                            fontFamily = TvFonts.Body
-                        )
-                    }
-                }
-            } else if (filteredChannels.isEmpty()) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                ) {
-                    Text(
-                        text = "No channels found for \"$searchQuery\"",
-                        color = TvColors.TextSecondary,
-                        fontSize = 14.sp,
-                        fontFamily = TvFonts.Body
-                    )
-                }
-            } else {
-                Text(
-                    text = "${filteredChannels.size} channels found",
-                    color = TvColors.TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    fontFamily = TvFonts.Body,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-                )
-
-                // Results list
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    itemsIndexed(filteredChannels) { index, channel ->
-                        var isItemFocused by remember { mutableStateOf(false) }
-
-                        val itemModifier = if (index == 0) {
-                            Modifier.focusRequester(firstResultFocusRequester)
-                        } else Modifier
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = itemModifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(
-                                    if (isItemFocused) TvColors.Focus else TvColors.SurfaceRaised
-                                )
-                                .border(
-                                    BorderStroke(
-                                        if (isItemFocused) 1.5.dp else 1.dp,
-                                        if (isItemFocused) TvColors.FocusGlow else TvColors.BorderSubtle
-                                    ),
-                                    RoundedCornerShape(8.dp)
-                                )
-                                .onFocusChanged { isItemFocused = it.isFocused }
-                                .clickable { onSelectChannel(channel) }
-                                .onPreviewKeyEvent { event ->
-                                    if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                                        if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP && index == 0) {
-                                            searchBoxFocusRequester.requestFocus()
-                                            true
-                                        } else if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                                                   event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER) {
-                                            onSelectChannel(channel)
-                                            true
-                                        } else false
-                                    } else false
-                                }
-                                .focusable()
-                                .padding(horizontal = 12.dp, vertical = 10.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                // Logo
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(TvColors.Background)
-                                ) {
-                                    if (!channel.cover.isNullOrEmpty()) {
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(LocalContext.current)
-                                                .data(channel.cover)
-                                                .size(96, 96)
-                                                .crossfade(false)
-                                                .build(),
-                                            contentDescription = channel.baseName,
-                                            contentScale = ContentScale.Fit,
-                                            modifier = Modifier.size(26.dp)
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Tv,
-                                            contentDescription = null,
-                                            tint = TvColors.TextMuted,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-
-                                Column {
-                                    Text(
-                                        text = channel.baseName,
-                                        color = Color.White,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontFamily = TvFonts.Body,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = channel.category,
-                                        color = if (isItemFocused) Color.White.copy(alpha = 0.8f) else TvColors.TextSecondary,
-                                        fontSize = 11.sp,
-                                        fontFamily = TvFonts.Body
-                                    )
-                                }
-                            }
-
-                            // Badges
-                            val lang = channel.defaultLanguage
-                            if (lang.isNotBlank()) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(if (isItemFocused) Color.Black.copy(alpha = 0.3f) else TvColors.BadgeBackground)
-                                        .padding(horizontal = 6.dp, vertical = 3.dp)
-                                ) {
-                                    Text(
-                                        text = lang,
-                                        color = if (isItemFocused) Color.White else TvColors.Accent,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = TvFonts.Body
-                                    )
-                                }
                             }
                         }
                     }
