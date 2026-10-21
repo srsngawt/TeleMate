@@ -104,6 +104,7 @@ fun TiviMateRecordingPlayerScreen(
         }
     }
     var isPlaying by remember { mutableStateOf(true) }
+    var showControls by remember { mutableStateOf(true) }
     var playerDurationMs by remember { mutableLongStateOf(0L) }
 
     DisposableEffect(recordingPlayer, localFile) {
@@ -124,6 +125,7 @@ fun TiviMateRecordingPlayerScreen(
                     if (d > 0L) playerDurationMs = d
                 } else if (state == Player.STATE_ENDED) {
                     isPlaying = false
+                    showControls = true
                 }
             }
             override fun onPlayerError(error: PlaybackException) {
@@ -224,20 +226,35 @@ fun TiviMateRecordingPlayerScreen(
         return
     }
 
-    var showControls by remember { mutableStateOf(true) }
     var currentPosMs by remember { mutableLongStateOf(0L) }
     var seekToastText by remember { mutableStateOf<String?>(null) }
 
-    val totalDurationMs = remember(recording, playerDurationMs) {
-        if (playerDurationMs > 0L) playerDurationMs
-        else (recording.durationSeconds * 1000L).coerceAtLeast(1000L)
+    val totalDurationMs = remember(recording.durationSeconds, playerDurationMs) {
+        val recMs = recording.durationSeconds * 1000L
+        if (recMs > 0L) {
+            recMs
+        } else if (playerDurationMs > 0L) {
+            playerDurationMs
+        } else {
+            1000L
+        }
     }
 
-    // Continuously read player position
-    LaunchedEffect(recordingPlayer) {
+    // Continuously read player position and enforce recorded duration limit
+    LaunchedEffect(recordingPlayer, totalDurationMs) {
         while (true) {
-            currentPosMs = recordingPlayer.currentPosition.coerceAtLeast(0L)
-            delay(250)
+            val rawPos = recordingPlayer.currentPosition.coerceAtLeast(0L)
+            if (rawPos >= totalDurationMs) {
+                if (recordingPlayer.isPlaying) {
+                    recordingPlayer.pause()
+                }
+                currentPosMs = totalDurationMs
+                isPlaying = false
+                showControls = true
+            } else {
+                currentPosMs = rawPos
+            }
+            delay(150)
         }
     }
 
@@ -295,9 +312,12 @@ fun TiviMateRecordingPlayerScreen(
     }
 
     fun seekBy(deltaMs: Long) {
-        val target = (recordingPlayer.currentPosition + deltaMs).coerceIn(0L, totalDurationMs)
+        val target = (currentPosMs + deltaMs).coerceIn(0L, totalDurationMs)
         recordingPlayer.seekTo(target)
         currentPosMs = target
+        if (target < totalDurationMs && !recordingPlayer.isPlaying && isPlaying) {
+            recordingPlayer.play()
+        }
         showControls = true
         controlsInteractionTimestamp = System.currentTimeMillis()
         val curSec = target / 1000
@@ -306,7 +326,12 @@ fun TiviMateRecordingPlayerScreen(
     }
 
     fun togglePlayPause() {
-        if (recordingPlayer.isPlaying) {
+        if (currentPosMs >= totalDurationMs) {
+            recordingPlayer.seekTo(0L)
+            currentPosMs = 0L
+            recordingPlayer.play()
+            isPlaying = true
+        } else if (recordingPlayer.isPlaying) {
             recordingPlayer.pause()
         } else {
             recordingPlayer.play()
@@ -536,6 +561,8 @@ fun TiviMateRecordingPlayerScreen(
                     }
 
                     // 2. Time Indicators (Current / Total)
+                    val totalSec = totalDurationMs / 1000
+                    val formattedTotal = String.format("%02d:%02d", totalSec / 60, totalSec % 60)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -551,7 +578,7 @@ fun TiviMateRecordingPlayerScreen(
                             fontFamily = TvFonts.Body
                         )
                         Text(
-                            text = recording.formattedDuration,
+                            text = formattedTotal,
                             color = TvColors.TextSecondary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,

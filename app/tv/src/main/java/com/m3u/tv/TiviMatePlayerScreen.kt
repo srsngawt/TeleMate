@@ -134,6 +134,7 @@ fun TiviMatePlayerScreen(
     val drawerCloseFocusRequester = remember { FocusRequester() }
     val drawerListState = androidx.compose.foundation.lazy.rememberLazyListState()
     var currentRecordingId by remember { mutableStateOf<String?>(null) }
+    var recordingStartTimeMs by remember { mutableLongStateOf(0L) }
 
     // Timeshift / Live seeking logic
     val onSeekBy: (Long) -> Unit = { deltaSec ->
@@ -164,10 +165,13 @@ fun TiviMatePlayerScreen(
     // Live Recording Timer
     LaunchedEffect(isRecording) {
         if (isRecording) {
-            recordingSeconds = 0
             while (true) {
-                delay(1000)
-                recordingSeconds++
+                delay(500)
+                if (recordingStartTimeMs > 0L) {
+                    recordingSeconds = ((System.currentTimeMillis() - recordingStartTimeMs) / 1000L).toInt()
+                } else {
+                    recordingSeconds++
+                }
             }
         }
     }
@@ -243,16 +247,6 @@ fun TiviMatePlayerScreen(
         }
     }
 
-    BackHandler {
-        when {
-            showLanguageDialog -> showLanguageDialog = false
-            showQualityDialog -> showQualityDialog = false
-            showQuickChannelDrawer -> showQuickChannelDrawer = false
-            showInfobar -> showInfobar = false
-            else -> onBackToGuide()
-        }
-    }
-
     // Resolve UnifiedChannel for current channel
     val currentUnified = remember(channel, channelList, favoriteChannels) {
         if (channel == null) null
@@ -263,25 +257,53 @@ fun TiviMatePlayerScreen(
         }
     }
 
+    val stopAndSaveRecording: () -> Unit = {
+        if (isRecording) {
+            isRecording = false
+            val filePath = StreamRecorder.stop()
+            val recId = currentRecordingId ?: java.util.UUID.randomUUID().toString()
+            val localFile = java.io.File(context.filesDir, "recordings/rec_${recId}.ts")
+            val savedPath = filePath ?: localFile.absolutePath
+            val elapsedSec = if (recordingStartTimeMs > 0L) {
+                ((System.currentTimeMillis() - recordingStartTimeMs) / 1000L).toInt()
+            } else {
+                recordingSeconds
+            }
+            val finalDuration = maxOf(1, elapsedSec)
+            val rec = TvRecording(
+                id = recId,
+                channelId = channel?.id ?: 0,
+                channelName = channel?.title ?: "Live Channel",
+                showTitle = "${currentUnified?.baseName ?: channel?.title ?: "Live Channel"} Broadcast",
+                coverUrl = channel?.cover,
+                streamUrl = savedPath,
+                durationSeconds = finalDuration,
+                timestamp = System.currentTimeMillis()
+            )
+            RecordingsManager.saveRecording(context, rec)
+            currentRecordingId = null
+            recordingStartTimeMs = 0L
+            zappingToastText = "⏹️ Recording saved (${rec.formattedDuration})"
+        }
+    }
+
+    BackHandler {
+        if (isRecording) {
+            stopAndSaveRecording()
+            return@BackHandler
+        }
+        when {
+            showLanguageDialog -> showLanguageDialog = false
+            showQualityDialog -> showQualityDialog = false
+            showQuickChannelDrawer -> showQuickChannelDrawer = false
+            showInfobar -> showInfobar = false
+            else -> onBackToGuide()
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
-            if (isRecording) {
-                val filePath = StreamRecorder.stop()
-                val recId = currentRecordingId ?: java.util.UUID.randomUUID().toString()
-                val localFile = java.io.File(context.filesDir, "recordings/rec_${recId}.ts")
-                val savedPath = filePath ?: localFile.absolutePath
-                val rec = TvRecording(
-                    id = recId,
-                    channelId = channel?.id ?: 0,
-                    channelName = channel?.title ?: "Live Channel",
-                    showTitle = "${currentUnified?.baseName ?: channel?.title ?: "Live Channel"} Broadcast",
-                    coverUrl = channel?.cover,
-                    streamUrl = savedPath,
-                    durationSeconds = maxOf(1, recordingSeconds),
-                    timestamp = System.currentTimeMillis()
-                )
-                RecordingsManager.saveRecording(context, rec)
-            }
+            stopAndSaveRecording()
         }
     }
 
@@ -366,6 +388,14 @@ fun TiviMatePlayerScreen(
                     val action = event.nativeKeyEvent.action
                     val keyCode = event.nativeKeyEvent.keyCode
                     if (action == KeyEvent.ACTION_DOWN) {
+                        if (isRecording && !showQuickChannelDrawer) {
+                            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                                keyCode == KeyEvent.KEYCODE_ENTER ||
+                                keyCode == KeyEvent.KEYCODE_BACK) {
+                                stopAndSaveRecording()
+                                return@onPreviewKeyEvent true
+                            }
+                        }
                         if (!showInfobar && !showQuickChannelDrawer) {
                             when (keyCode) {
                                 KeyEvent.KEYCODE_DPAD_UP -> {
@@ -755,30 +785,14 @@ fun TiviMatePlayerScreen(
                                 currentRecordingId = recId
                                 isRecording = true
                                 recordingSeconds = 0
+                                recordingStartTimeMs = System.currentTimeMillis()
                                 val channelUrl = channel?.url ?: ""
                                 if (channelUrl.isNotBlank()) {
                                     StreamRecorder.start(context, recId, channelUrl)
                                 }
                                 zappingToastText = "🔴 Recording started: ${channel?.title ?: "Stream"}"
                             } else {
-                                isRecording = false
-                                val filePath = StreamRecorder.stop()
-                                val recId = currentRecordingId ?: java.util.UUID.randomUUID().toString()
-                                val localFile = java.io.File(context.filesDir, "recordings/rec_${recId}.ts")
-                                val savedPath = filePath ?: localFile.absolutePath
-                                val rec = TvRecording(
-                                    id = recId,
-                                    channelId = channel?.id ?: 0,
-                                    channelName = channel?.title ?: "Live Channel",
-                                    showTitle = "${currentUnified?.baseName ?: channel?.title ?: "Live Channel"} Broadcast",
-                                    coverUrl = channel?.cover,
-                                    streamUrl = savedPath,
-                                    durationSeconds = maxOf(1, recordingSeconds),
-                                    timestamp = System.currentTimeMillis()
-                                )
-                                RecordingsManager.saveRecording(context, rec)
-                                currentRecordingId = null
-                                zappingToastText = "⏹️ Recording saved (${rec.formattedDuration})"
+                                stopAndSaveRecording()
                             }
                         }
                     )
