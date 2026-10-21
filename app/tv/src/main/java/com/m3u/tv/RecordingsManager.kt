@@ -234,6 +234,7 @@ object StreamRecorder {
         }
 
         val downloadedSegments = LinkedHashSet<String>()
+        var isFirstPlaylistFetch = true
 
         while (currentCoroutineContext().isActive) {
             var pollDelayMs = 2000L
@@ -263,6 +264,7 @@ object StreamRecorder {
                         pollDelayMs = (durSec * 1000L / 2).coerceIn(1000L, 3500L)
                     }
 
+                    val segmentUrls = mutableListOf<String>()
                     for (line in mediaText.lines()) {
                         if (!currentCoroutineContext().isActive) break
                         val trimmed = line.trim()
@@ -282,6 +284,21 @@ object StreamRecorder {
                         if (trimmed.startsWith("#")) continue
 
                         val segUrl = resolveUrl(mediaPlaylistUrl, trimmed)
+                        segmentUrls.add(segUrl)
+                    }
+
+                    if (isFirstPlaylistFetch) {
+                        isFirstPlaylistFetch = false
+                        val isLive = !mediaText.contains("#EXT-X-ENDLIST")
+                        if (isLive && segmentUrls.size > 1) {
+                            // Skip past buffer history (e.g. 1 minute ago) and start strictly from the live edge
+                            val oldSegments = segmentUrls.dropLast(1)
+                            downloadedSegments.addAll(oldSegments)
+                        }
+                    }
+
+                    for (segUrl in segmentUrls) {
+                        if (!currentCoroutineContext().isActive) break
                         if (downloadedSegments.add(segUrl)) {
                             downloadChunk(segUrl, outputFile)
                         }
