@@ -624,6 +624,7 @@ fun TiviMatePlayerScreen(
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = TvFonts.Body,
                                     maxLines = 1,
+                                    softWrap = false,
                                     overflow = TextOverflow.Ellipsis
                                 )
 
@@ -747,7 +748,7 @@ fun TiviMatePlayerScreen(
                 // Action Row (TiviMate Tile Actions)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     TiviMateActionButton(
                         icon = Icons.Rounded.Tv,
@@ -1216,7 +1217,7 @@ private fun TiviMateActionButton(
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
             .background(if (isFocused) TvColors.Focus else TvColors.SurfaceRaised)
@@ -1264,20 +1265,22 @@ private fun TiviMateActionButton(
             }
             .clickable { onClick() }
             .focusable()
-            .padding(horizontal = 14.dp, vertical = 9.dp)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
             tint = if (isFocused) Color.White else tint,
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(15.dp)
         )
         Text(
             text = label,
             color = if (isFocused) Color.White else TvColors.TextPrimary,
-            fontSize = 13.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
-            fontFamily = TvFonts.Body
+            fontFamily = TvFonts.Body,
+            maxLines = 1,
+            softWrap = false
         )
     }
 }

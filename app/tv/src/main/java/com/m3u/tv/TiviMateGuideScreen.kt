@@ -1,13 +1,16 @@
 package com.m3u.tv
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.speech.RecognizerIntent
 import android.view.KeyEvent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -1786,11 +1789,13 @@ private fun TiviMateSearchDialog(
     val rootFocusRequester = remember { FocusRequester() }
     val micFocusRequester = remember { FocusRequester() }
     val searchBoxFocusRequester = remember { FocusRequester() }
+    val closeButtonFocusRequester = remember { FocusRequester() }
     val textFieldFocusRequester = remember { FocusRequester() }
     val firstResultFocusRequester = remember { FocusRequester() }
 
     var isMicFocused by remember { mutableStateOf(false) }
     var isSearchBoxFocused by remember { mutableStateOf(false) }
+    var isCloseFocused by remember { mutableStateOf(false) }
 
     // Voice search launcher
     val speechLauncher = rememberLauncherForActivityResult(
@@ -1801,7 +1806,7 @@ private fun TiviMateSearchDialog(
                 ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 ?.firstOrNull()
             if (!spokenText.isNullOrBlank()) {
-                searchQuery = spokenText
+                searchQuery = spokenText.trim()
                 isEditing = false
                 try {
                     searchBoxFocusRequester.requestFocus()
@@ -1817,11 +1822,39 @@ private fun TiviMateSearchDialog(
                     RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                     RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
                 )
-                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak channel name...")
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Listening... Speak now")
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             }
             speechLauncher.launch(intent)
         } catch (_: Exception) {
             Toast.makeText(context, "Voice search not available on this device", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Permission launcher for YouTube-style voice permission dialog
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            startVoiceSearch()
+        } else {
+            Toast.makeText(
+                context,
+                "Microphone permission is required for voice search",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    val onMicClick = {
+        if (ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            startVoiceSearch()
+        } else {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
@@ -1838,11 +1871,11 @@ private fun TiviMateSearchDialog(
         }
     }
 
-    // Initial state: Request focus on root invisible container, so neither Mic nor Search box has focus
+    // Initial state: Request focus directly on search box
     LaunchedEffect(Unit) {
         delay(100)
         try {
-            rootFocusRequester.requestFocus()
+            searchBoxFocusRequester.requestFocus()
         } catch (_: Exception) {}
     }
 
@@ -1877,24 +1910,6 @@ private fun TiviMateSearchDialog(
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.88f))
             .clickable { onDismiss() }
-            .focusRequester(rootFocusRequester)
-            .onPreviewKeyEvent { event ->
-                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                    when (event.nativeKeyEvent.keyCode) {
-                        KeyEvent.KEYCODE_DPAD_LEFT,
-                        KeyEvent.KEYCODE_DPAD_RIGHT,
-                        KeyEvent.KEYCODE_DPAD_DOWN,
-                        KeyEvent.KEYCODE_DPAD_UP -> {
-                            if (!isMicFocused && !isSearchBoxFocused && !isEditing) {
-                                micFocusRequester.requestFocus()
-                                true
-                            } else false
-                        }
-                        else -> false
-                    }
-                } else false
-            }
-            .focusable()
     ) {
         Column(
             modifier = Modifier
@@ -1934,11 +1949,41 @@ private fun TiviMateSearchDialog(
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(34.dp)
                         .clip(CircleShape)
-                        .background(TvColors.SurfaceRaised)
-                        .border(BorderStroke(1.dp, TvColors.BorderSubtle), CircleShape)
+                        .background(
+                            if (isCloseFocused) TvColors.Danger else TvColors.SurfaceRaised
+                        )
+                        .border(
+                            BorderStroke(
+                                if (isCloseFocused) 2.dp else 1.dp,
+                                if (isCloseFocused) Color.White else TvColors.BorderSubtle
+                            ),
+                            CircleShape
+                        )
+                        .focusRequester(closeButtonFocusRequester)
+                        .onFocusChanged { isCloseFocused = it.isFocused }
                         .clickable { onDismiss() }
+                        .onPreviewKeyEvent { event ->
+                            if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                when (event.nativeKeyEvent.keyCode) {
+                                    KeyEvent.KEYCODE_DPAD_CENTER,
+                                    KeyEvent.KEYCODE_ENTER -> {
+                                        onDismiss()
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                        searchBoxFocusRequester.requestFocus()
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                        searchBoxFocusRequester.requestFocus()
+                                        true
+                                    }
+                                    else -> false
+                                }
+                            } else false
+                        }
                         .focusable()
                 ) {
                     Icon(
@@ -1976,17 +2021,21 @@ private fun TiviMateSearchDialog(
                         )
                         .focusRequester(micFocusRequester)
                         .onFocusChanged { isMicFocused = it.isFocused }
-                        .clickable { startVoiceSearch() }
+                        .clickable { onMicClick() }
                         .onPreviewKeyEvent { event ->
                             if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                                 when (event.nativeKeyEvent.keyCode) {
                                     KeyEvent.KEYCODE_DPAD_CENTER,
                                     KeyEvent.KEYCODE_ENTER -> {
-                                        startVoiceSearch()
+                                        onMicClick()
                                         true
                                     }
                                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                         searchBoxFocusRequester.requestFocus()
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_UP -> {
+                                        closeButtonFocusRequester.requestFocus()
                                         true
                                     }
                                     KeyEvent.KEYCODE_DPAD_DOWN -> {
@@ -2053,6 +2102,10 @@ private fun TiviMateSearchDialog(
                                     when (event.nativeKeyEvent.keyCode) {
                                         KeyEvent.KEYCODE_DPAD_LEFT -> {
                                             micFocusRequester.requestFocus()
+                                            true
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_UP -> {
+                                            closeButtonFocusRequester.requestFocus()
                                             true
                                         }
                                         KeyEvent.KEYCODE_DPAD_CENTER,
