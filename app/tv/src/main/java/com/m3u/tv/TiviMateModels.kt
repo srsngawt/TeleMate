@@ -87,8 +87,17 @@ object TiviMateChannelParser {
     )
 
     private val bracketRegex = Regex("[\\[(]([^\\])]*)[\\])]")
+    private val emptyBracketRegex = Regex("[\\[(]\\s*[\\])]")
+    private val orphanBracketRegex = Regex("[\\[\\]()]")
+    private val punctuationRegex = Regex("[-|_|:|/]+")
+    private val spacesRegex = Regex("\\s+")
+
+    private val parseCache = java.util.concurrent.ConcurrentHashMap<String, Triple<String, String, String>>(2048)
 
     fun parseChannel(channel: Channel): Triple<String, String, String> {
+        val cacheKey = "${channel.category}:::${channel.title}"
+        parseCache[cacheKey]?.let { return it }
+
         val rawTitle = channel.title.trim()
         var cleanTitle = rawTitle
 
@@ -126,24 +135,23 @@ object TiviMateChannelParser {
             }
         }
 
-        // Only use the detected language; do NOT default to Hindi
-        // if a channel has no language tag, it will be grouped as "Unknown"
-        // and the caller (groupChannels) will pick the actual first variant language.
         val finalLanguage = detectedLanguage ?: ""
 
         cleanTitle = cleanTitle
-            .replace(Regex("[\\[(]\\s*[\\])]"), "")
+            .replace(emptyBracketRegex, "")
             .replace(bracketRegex, "")
-            .replace(Regex("[\\[\\]()]"), "")
-            .replace(Regex("[-|_|:|/]+"), " ")
-            .replace(Regex("\\s+"), " ")
+            .replace(orphanBracketRegex, "")
+            .replace(punctuationRegex, " ")
+            .replace(spacesRegex, " ")
             .trim()
 
         if (cleanTitle.isEmpty()) {
             cleanTitle = rawTitle
         }
 
-        return Triple(cleanTitle, finalLanguage, detectedQuality)
+        val result = Triple(cleanTitle, finalLanguage, detectedQuality)
+        parseCache[cacheKey] = result
+        return result
     }
 
     fun normalizeLanguage(raw: String): String {

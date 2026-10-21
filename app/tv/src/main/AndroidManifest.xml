@@ -41,6 +41,8 @@
         android:localeConfig="@xml/locales_config"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
+        android:largeHeap="true"
+        android:hardwareAccelerated="true"
         android:theme="@style/Theme.M3U">
         <activity
             android:name=".MainActivity"

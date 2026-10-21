@@ -264,6 +264,89 @@ private fun getChannelTimelineShows(
 }
 
 @Composable
+private fun TiviMateClockDisplay(modifier: Modifier = Modifier) {
+    var timeString by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
+        while (true) {
+            timeString = sdf.format(Date())
+            delay(1000)
+        }
+    }
+    Text(
+        text = timeString,
+        color = Color.White,
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Bold,
+        fontFamily = TvFonts.Body,
+        modifier = modifier
+    )
+}
+
+@Composable
+private fun TiviMateTimelineHeader() {
+    var dateString by remember { mutableStateOf("") }
+    var timelineSlots by remember { mutableStateOf(emptyList<String>()) }
+
+    LaunchedEffect(Unit) {
+        val dateSdf = SimpleDateFormat("EEE, d MMM, hh:mm a", Locale.getDefault())
+        val slotSdf = SimpleDateFormat("HH:mm", Locale.getDefault())
+        while (true) {
+            val now = java.util.Calendar.getInstance()
+            dateString = dateSdf.format(now.time)
+
+            now.set(java.util.Calendar.MINUTE, if (now.get(java.util.Calendar.MINUTE) < 30) 0 else 30)
+            now.set(java.util.Calendar.SECOND, 0)
+            timelineSlots = (0..4).map { i ->
+                val cal = now.clone() as java.util.Calendar
+                cal.add(java.util.Calendar.MINUTE, i * 30)
+                slotSdf.format(cal.time)
+            }
+            delay(10_000)
+        }
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(TvColors.Surface)
+            .border(BorderStroke(1.dp, TvColors.BorderSubtle))
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+    ) {
+        Text(
+            text = dateString.ifEmpty { "Today, Live" },
+            color = TvColors.TextSecondary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = TvFonts.Body,
+            modifier = Modifier.width(240.dp)
+        )
+
+        Row(
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.weight(1f)
+        ) {
+            timelineSlots.forEach { slot ->
+                Text(
+                    text = slot,
+                    color = if (slot == timelineSlots.firstOrNull())
+                        TvColors.TimelineMarker
+                    else
+                        TvColors.TextMuted,
+                    fontSize = 11.sp,
+                    fontWeight = if (slot == timelineSlots.firstOrNull())
+                        FontWeight.Bold
+                    else
+                        FontWeight.Normal,
+                    fontFamily = TvFonts.Body
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun TiviMateGuideScreen(
     channels: List<Channel>,
     favoriteChannels: List<Channel>,
@@ -330,19 +413,6 @@ fun TiviMateGuideScreen(
     val activeQuality = focusedUnifiedChannel?.let {
         selectedQualities[it.id] ?: it.defaultQuality
     } ?: "HD"
-
-    var currentTimeString by remember { mutableStateOf("") }
-    var currentDateString by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) {
-        val timeSdf = SimpleDateFormat("HH:mm", Locale.getDefault())
-        val dateSdf = SimpleDateFormat("EEE, d MMM, hh:mm a", Locale.getDefault())
-        while (true) {
-            val now = Date()
-            currentTimeString = timeSdf.format(now)
-            currentDateString = dateSdf.format(now)
-            delay(1000)
-        }
-    }
 
     val channelListState = rememberLazyListState()
     val categoryListState = rememberLazyListState()
@@ -775,13 +845,7 @@ fun TiviMateGuideScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Text(
-                                    text = currentTimeString,
-                                    color = Color.White,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = TvFonts.Body
-                                )
+                                TiviMateClockDisplay()
 
                                 Box(
                                     contentAlignment = Alignment.Center,
@@ -1009,7 +1073,11 @@ fun TiviMateGuideScreen(
                         contentPadding = PaddingValues(vertical = 4.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        itemsIndexed(groups) { index, (groupName, count) ->
+                        itemsIndexed(
+                            items = groups,
+                            key = { _, (groupName, _) -> groupName },
+                            contentType = { _, _ -> "category_row" }
+                        ) { index, (groupName, count) ->
                             val isSelected = index == selectedGroupIndex
                             var isFocused by remember { mutableStateOf(false) }
                             val rowRequester = categoryFocusRequesters.getOrPut(index) { FocusRequester() }
@@ -1104,56 +1172,7 @@ fun TiviMateGuideScreen(
                         .fillMaxHeight()
                         .background(TvColors.BackgroundSoft)
                 ) {
-                    // Timeline Header — dynamic: shows current date + next 30-min slots
-                    val timelineSlots = remember(currentTimeString) {
-                        val sdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-                        val now = java.util.Calendar.getInstance()
-                        now.set(java.util.Calendar.MINUTE, if (now.get(java.util.Calendar.MINUTE) < 30) 0 else 30)
-                        now.set(java.util.Calendar.SECOND, 0)
-                        (0..4).map { i ->
-                            val cal = now.clone() as java.util.Calendar
-                            cal.add(java.util.Calendar.MINUTE, i * 30)
-                            sdf.format(cal.time)
-                        }
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(TvColors.Surface)
-                            .border(BorderStroke(1.dp, TvColors.BorderSubtle))
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
-                    ) {
-                        Text(
-                            text = currentDateString.ifEmpty { "Today, Live" },
-                            color = TvColors.TextSecondary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = TvFonts.Body,
-                            modifier = Modifier.width(240.dp)
-                        )
-
-                        Row(
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            timelineSlots.forEach { slot ->
-                                Text(
-                                    text = slot,
-                                    color = if (slot == timelineSlots.first())
-                                        TvColors.TimelineMarker
-                                    else
-                                        TvColors.TextMuted,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (slot == timelineSlots.first())
-                                        FontWeight.Bold
-                                    else
-                                        FontWeight.Normal,
-                                    fontFamily = TvFonts.Body
-                                )
-                            }
-                        }
-                    }
+                    TiviMateTimelineHeader()
 
                     // Channels List with Show Time and Details
                     if (displayedChannels.isEmpty()) {
@@ -1199,7 +1218,11 @@ fun TiviMateGuideScreen(
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                        itemsIndexed(displayedChannels) { index, item ->
+                        itemsIndexed(
+                            items = displayedChannels,
+                            key = { _, item -> item.id },
+                            contentType = { _, _ -> "channel_row" }
+                        ) { index, item ->
                             var isFocused by remember { mutableStateOf(false) }
                             val isPlayingThis = activeChannel?.id == item.getStreamFor(
                                 selectedLanguages[item.id] ?: item.defaultLanguage,
