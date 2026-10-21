@@ -11,6 +11,9 @@
         <intent>
             <action android:name="com.m3u.extension.action.BIND_EXTENSION" />
         </intent>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
     </queries>
 
     <uses-permission android:name="android.permission.INTERNET" />

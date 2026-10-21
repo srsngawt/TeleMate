@@ -534,6 +534,19 @@ fun TiviMateGuideScreen(
         }
     }
 
+    // Immediately pause live player video & audio when Search Window opens; resume when closed
+    LaunchedEffect(showSearchOverlay) {
+        if (showSearchOverlay) {
+            try {
+                player?.pause()
+            } catch (_: Exception) {}
+        } else if (isGuideVisible) {
+            try {
+                player?.play()
+            } catch (_: Exception) {}
+        }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxSize()
@@ -1825,7 +1838,9 @@ private fun TiviMateSearchDialog(
         try {
             speechRecognizer?.stopListening()
             speechRecognizer?.cancel()
+            speechRecognizer?.destroy()
         } catch (_: Exception) {}
+        speechRecognizer = null
         isListening = false
     }
 
@@ -1847,6 +1862,26 @@ private fun TiviMateSearchDialog(
 
             override fun onError(error: Int) {
                 isListening = false
+                try {
+                    speechRecognizer?.destroy()
+                } catch (_: Exception) {}
+                speechRecognizer = null
+
+                val msg = when (error) {
+                    SpeechRecognizer.ERROR_AUDIO -> "Audio recording error. Check mic."
+                    SpeechRecognizer.ERROR_CLIENT -> "" // User stopped or client cancel
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission required."
+                    SpeechRecognizer.ERROR_NETWORK -> "Network error for voice search."
+                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout."
+                    SpeechRecognizer.ERROR_NO_MATCH -> "No speech recognized. Please speak clearly into remote."
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Voice recognizer is busy, please retry."
+                    SpeechRecognizer.ERROR_SERVER -> "Voice server error."
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech heard. Speak closer to remote mic."
+                    else -> "Speech recognition error ($error)"
+                }
+                if (msg.isNotEmpty()) {
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                }
             }
 
             override fun onResults(results: Bundle?) {
@@ -1857,6 +1892,10 @@ private fun TiviMateSearchDialog(
                     isEditing = false
                 }
                 isListening = false
+                try {
+                    speechRecognizer?.destroy()
+                } catch (_: Exception) {}
+                speechRecognizer = null
             }
 
             override fun onPartialResults(partialResults: Bundle?) {
@@ -1887,7 +1926,14 @@ private fun TiviMateSearchDialog(
             if (!SpeechRecognizer.isRecognitionAvailable(context)) {
                 Toast.makeText(context, "Voice recognition not available on this device", Toast.LENGTH_SHORT).show()
             } else {
-                val recognizer = speechRecognizer ?: SpeechRecognizer.createSpeechRecognizer(context).also {
+                try {
+                    speechRecognizer?.stopListening()
+                    speechRecognizer?.cancel()
+                    speechRecognizer?.destroy()
+                } catch (_: Exception) {}
+                speechRecognizer = null
+
+                val recognizer = SpeechRecognizer.createSpeechRecognizer(context).also {
                     speechRecognizer = it
                 }
                 recognizer.setRecognitionListener(recognitionListener)
@@ -1896,12 +1942,13 @@ private fun TiviMateSearchDialog(
                         RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                         RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
                     )
+                    putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
                 }
-                try {
-                    recognizer.cancel()
-                } catch (_: Exception) {}
                 searchQuery = ""
                 isListening = true
                 recognizer.startListening(intent)
@@ -1995,21 +2042,14 @@ private fun TiviMateSearchDialog(
     }
 
     Box(
-        contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.88f))
-            .clickable { onDismiss() }
+            .background(TvColors.Background)
     ) {
         Column(
             modifier = Modifier
-                .width(620.dp)
-                .fillMaxHeight(0.85f)
-                .clip(RoundedCornerShape(16.dp))
-                .background(TvColors.Surface)
-                .border(BorderStroke(1.dp, TvColors.BorderSubtle), RoundedCornerShape(16.dp))
-                .clickable(enabled = false) {}
-                .padding(20.dp)
+                .fillMaxSize()
+                .padding(horizontal = 48.dp, vertical = 28.dp)
         ) {
             // Header
             Row(
@@ -2019,18 +2059,18 @@ private fun TiviMateSearchDialog(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Search,
                         contentDescription = "Search",
                         tint = TvColors.Focus,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(28.dp)
                     )
                     Text(
                         text = "Search Channels",
                         color = Color.White,
-                        fontSize = 18.sp,
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = TvFonts.Body
                     )
@@ -2039,7 +2079,7 @@ private fun TiviMateSearchDialog(
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(34.dp)
+                        .size(36.dp)
                         .clip(CircleShape)
                         .background(
                             if (isCloseFocused) TvColors.Danger else TvColors.SurfaceRaised
@@ -2062,10 +2102,7 @@ private fun TiviMateSearchDialog(
                                         onDismiss()
                                         true
                                     }
-                                    KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                        searchBoxFocusRequester.requestFocus()
-                                        true
-                                    }
+                                    KeyEvent.KEYCODE_DPAD_DOWN,
                                     KeyEvent.KEYCODE_DPAD_LEFT -> {
                                         searchBoxFocusRequester.requestFocus()
                                         true
@@ -2080,17 +2117,17 @@ private fun TiviMateSearchDialog(
                         imageVector = Icons.Rounded.Close,
                         contentDescription = "Close",
                         tint = Color.White,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // Search input field with Mic Button (MIC ON THE LEFT, SEARCH BOX ON THE RIGHT)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 // 1. Voice Search Mic Button (LEFT SIDE)
@@ -2115,7 +2152,7 @@ private fun TiviMateSearchDialog(
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(46.dp)
+                        .size(48.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(micBg)
                         .border(micBorder, RoundedCornerShape(10.dp))
@@ -2154,7 +2191,7 @@ private fun TiviMateSearchDialog(
                         imageVector = Icons.Rounded.Mic,
                         contentDescription = "Voice Search",
                         tint = micTint,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                 }
 
@@ -2171,7 +2208,7 @@ private fun TiviMateSearchDialog(
                     contentAlignment = Alignment.CenterStart,
                     modifier = Modifier
                         .weight(1f)
-                        .height(46.dp)
+                        .height(48.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(TvColors.BackgroundSoft)
                         .border(searchBoxBorder, RoundedCornerShape(10.dp))
@@ -2229,7 +2266,7 @@ private fun TiviMateSearchDialog(
                             } else false
                         }
                         .focusable()
-                        .padding(horizontal = 14.dp)
+                        .padding(horizontal = 16.dp)
                 ) {
                     if (isEditing) {
                         BasicTextField(
