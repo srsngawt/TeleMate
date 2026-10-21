@@ -94,7 +94,10 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.m3u.data.database.model.Channel
 import com.m3u.data.database.model.Programme
 import java.text.SimpleDateFormat
@@ -417,6 +420,47 @@ fun TiviMateGuideScreen(
     val channelListState = rememberLazyListState()
     val categoryListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+
+    val onSelectStream: (Channel) -> Unit = { stream ->
+        if (activeChannel?.id != stream.id) {
+            onPlayChannel(stream)
+        }
+        onOpenFullscreen()
+    }
+
+    val onChannelPageUp: () -> Unit = {
+        if (focusedChannelIndex + 1 < displayedChannels.size) {
+            focusedChannelIndex++
+            val nextItem = displayedChannels[focusedChannelIndex]
+            val stream = nextItem.getStreamFor(
+                selectedLanguages[nextItem.id] ?: nextItem.defaultLanguage,
+                selectedQualities[nextItem.id] ?: nextItem.defaultQuality
+            )
+            if (activeChannel?.id != stream.id) {
+                onPlayChannel(stream)
+            }
+            scope.launch {
+                channelListState.animateScrollToItem(maxOf(0, focusedChannelIndex - 1))
+            }
+        }
+    }
+
+    val onChannelPageDown: () -> Unit = {
+        if (focusedChannelIndex - 1 >= 0) {
+            focusedChannelIndex--
+            val prevItem = displayedChannels[focusedChannelIndex]
+            val stream = prevItem.getStreamFor(
+                selectedLanguages[prevItem.id] ?: prevItem.defaultLanguage,
+                selectedQualities[prevItem.id] ?: prevItem.defaultQuality
+            )
+            if (activeChannel?.id != stream.id) {
+                onPlayChannel(stream)
+            }
+            scope.launch {
+                channelListState.animateScrollToItem(maxOf(0, focusedChannelIndex - 1))
+            }
+        }
+    }
 
     // Focus Requesters for clean TV Navigation between columns
     val railFocusRequester = remember { FocusRequester() }
@@ -805,7 +849,11 @@ fun TiviMateGuideScreen(
                                 ) {
                                     if (!focusedUnifiedChannel.cover.isNullOrEmpty()) {
                                         AsyncImage(
-                                            model = focusedUnifiedChannel.cover,
+                                            model = ImageRequest.Builder(LocalContext.current)
+                                                .data(focusedUnifiedChannel.cover)
+                                                .size(128, 128)
+                                                .crossfade(false)
+                                                .build(),
                                             contentDescription = focusedUnifiedChannel.baseName,
                                             contentScale = ContentScale.Fit,
                                             modifier = Modifier.size(36.dp)
@@ -1223,246 +1271,32 @@ fun TiviMateGuideScreen(
                             key = { _, item -> item.id },
                             contentType = { _, _ -> "channel_row" }
                         ) { index, item ->
-                            var isFocused by remember { mutableStateOf(false) }
-                            val isPlayingThis = activeChannel?.id == item.getStreamFor(
+                            val streamChannel = item.getStreamFor(
                                 selectedLanguages[item.id] ?: item.defaultLanguage,
                                 selectedQualities[item.id] ?: item.defaultQuality
-                            ).id
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 2.dp)
-                            ) {
-                                // 1. PINNED LEFT CHANNEL CARD (Fixed ~240dp width)
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .width(240.dp)
-                                        .height(48.dp)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(
-                                            when {
-                                                isFocused -> TvColors.Focus
-                                                isPlayingThis -> TvColors.SurfaceRaised
-                                                else -> TvColors.Surface
-                                            }
-                                        )
-                                        .border(
-                                            BorderStroke(
-                                                if (isFocused) 1.5.dp else 1.dp,
-                                                if (isFocused) TvColors.FocusGlow else TvColors.BorderSubtle
-                                            ),
-                                            RoundedCornerShape(6.dp)
-                                        )
-                                        .then(if (index == focusedChannelIndex) Modifier.focusRequester(channelFocusRequester) else Modifier)
-                                        .onFocusChanged {
-                                            isFocused = it.isFocused
-                                            if (it.isFocused) {
-                                                focusedChannelIndex = index
-                                            }
-                                        }
-                                        .clickable {
-                                            val stream = item.getStreamFor(
-                                                selectedLanguages[item.id] ?: item.defaultLanguage,
-                                                selectedQualities[item.id] ?: item.defaultQuality
-                                            )
-                                            onPlayChannel(stream)
-                                            onOpenFullscreen()
-                                        }
-                                        .onPreviewKeyEvent { event ->
-                                            if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                                                when (event.nativeKeyEvent.keyCode) {
-                                                    KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
-                                                        if (focusedChannelIndex + 1 < displayedChannels.size) {
-                                                            focusedChannelIndex++
-                                                            val nextItem = displayedChannels[focusedChannelIndex]
-                                                            val stream = nextItem.getStreamFor(
-                                                                selectedLanguages[nextItem.id] ?: nextItem.defaultLanguage,
-                                                                selectedQualities[nextItem.id] ?: nextItem.defaultQuality
-                                                            )
-                                                            onPlayChannel(stream)
-                                                            scope.launch {
-                                                                channelListState.animateScrollToItem(maxOf(0, focusedChannelIndex - 1))
-                                                            }
-                                                        }
-                                                        true
-                                                    }
-                                                    KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
-                                                        if (focusedChannelIndex - 1 >= 0) {
-                                                            focusedChannelIndex--
-                                                            val prevItem = displayedChannels[focusedChannelIndex]
-                                                            val stream = prevItem.getStreamFor(
-                                                                selectedLanguages[prevItem.id] ?: prevItem.defaultLanguage,
-                                                                selectedQualities[prevItem.id] ?: prevItem.defaultQuality
-                                                            )
-                                                            onPlayChannel(stream)
-                                                            scope.launch {
-                                                                channelListState.animateScrollToItem(maxOf(0, focusedChannelIndex - 1))
-                                                            }
-                                                        }
-                                                        true
-                                                    }
-                                                    KeyEvent.KEYCODE_DPAD_UP -> {
-                                                        if (index == 0) {
-                                                            // Already at top channel: do nothing, consume event so focus never leaves channel list!
-                                                            true
-                                                        } else false
-                                                    }
-                                                    KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                                        if (index == displayedChannels.size - 1) {
-                                                            // Already at bottom channel: do nothing, consume event so focus never leaves channel list!
-                                                            true
-                                                        } else false
-                                                    }
-                                                    KeyEvent.KEYCODE_DPAD_LEFT -> {
-                                                        categoryFocusRequester.requestFocus()
-                                                        true
-                                                    }
-                                                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                                                        val stream = item.getStreamFor(
-                                                            selectedLanguages[item.id] ?: item.defaultLanguage,
-                                                            selectedQualities[item.id] ?: item.defaultQuality
-                                                        )
-                                                        onPlayChannel(stream)
-                                                        onOpenFullscreen()
-                                                        true
-                                                    }
-                                                    else -> false
-                                                }
-                                            } else false
-                                        }
-                                        .focusable()
-                                        .padding(horizontal = 8.dp)
-                                ) {
-                                    // Channel Number
-                                    Text(
-                                        text = "${index + 1}",
-                                        color = if (isFocused) Color.White.copy(alpha = 0.85f) else TvColors.TextMuted,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontFamily = TvFonts.Body,
-                                        modifier = Modifier.width(26.dp)
-                                    )
-
-                                    // Logo
-                                    Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(TvColors.Background)
-                                    ) {
-                                        if (!item.cover.isNullOrEmpty()) {
-                                            AsyncImage(
-                                                model = item.cover,
-                                                contentDescription = item.baseName,
-                                                contentScale = ContentScale.Fit,
-                                                modifier = Modifier.size(24.dp)
-                                            )
-                                        } else {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Tv,
-                                                contentDescription = null,
-                                                tint = TvColors.TextMuted,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.width(8.dp))
-
-                                    // Channel Name
-                                    Text(
-                                        text = item.baseName,
-                                        color = if (isFocused) Color.White else TvColors.TextPrimary,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontFamily = TvFonts.Body,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-
-                                    // Badges: Language & Quality & Favorite
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        // Full Title Case Language (Hidden if blank)
-                                        val currentLang = TiviMateChannelParser.normalizeLanguage(
-                                            selectedLanguages[item.id] ?: item.defaultLanguage
-                                        )
-                                        if (currentLang.isNotBlank()) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(4.dp))
-                                                    .background(if (isFocused) Color.Black.copy(alpha = 0.3f) else TvColors.BadgeBackground)
-                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                                            ) {
-                                                Text(
-                                                    text = currentLang,
-                                                    color = if (isFocused) Color.White else TvColors.Accent,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontFamily = TvFonts.Body
-                                                )
-                                            }
-                                        }
-
-                                        if (item.isFavorite) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Favorite,
-                                                contentDescription = "Favorite",
-                                                tint = if (isFocused) Color.White else TvColors.Danger,
-                                                modifier = Modifier.size(12.dp)
-                                            )
-                                        }
-                                    }
+                            )
+                            val programme = currentProgrammes[streamChannel.relationId]
+                                ?: streamChannel.relationId?.substringBefore('@')?.let { baseId ->
+                                    currentProgrammes["$baseId@HD"] ?: currentProgrammes["$baseId@SD"] ?: currentProgrammes[baseId]
                                 }
 
-                                Spacer(modifier = Modifier.width(6.dp))
-
-                                // 2. HORIZONTALLY SCROLLABLE PROGRAM TIMELINE (LazyRow)
-                                val streamChannel = remember(item, selectedLanguages[item.id], selectedQualities[item.id]) {
-                                    item.getStreamFor(
-                                        selectedLanguages[item.id] ?: item.defaultLanguage,
-                                        selectedQualities[item.id] ?: item.defaultQuality
-                                    )
-                                }
-                                val programme = currentProgrammes[streamChannel.relationId]
-                                    ?: streamChannel.relationId?.substringBefore('@')?.let { baseId ->
-                                        currentProgrammes["$baseId@HD"] ?: currentProgrammes["$baseId@SD"] ?: currentProgrammes[baseId]
-                                    }
-                                val timelineShows = remember(item.baseName, item.category, programme) {
-                                    getChannelTimelineShows(
-                                        channelName = item.baseName,
-                                        category = item.category,
-                                        programme = programme
-                                    )
-                                }
-
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    itemsIndexed(timelineShows) { slotIdx, show ->
-                                        TiviMateProgramSlotCard(
-                                            show = show,
-                                            onSelect = {
-                                                focusedChannelIndex = index
-                                                onPlayChannel(streamChannel)
-                                                onOpenFullscreen()
-                                            },
-                                            onNavigateLeft = if (slotIdx == 0) {
-                                                { channelFocusRequester.requestFocus() }
-                                            } else null
-                                        )
-                                    }
-                                }
-                            }
+                            TiviMateChannelRow(
+                                item = item,
+                                index = index,
+                                isTargetFocused = index == focusedChannelIndex,
+                                isPlayingThis = activeChannel?.id == streamChannel.id,
+                                selectedLanguage = selectedLanguages[item.id],
+                                selectedQuality = selectedQualities[item.id],
+                                programme = programme,
+                                channelFocusRequester = channelFocusRequester,
+                                categoryFocusRequester = categoryFocusRequester,
+                                onFocused = { focusedChannelIndex = index },
+                                onSelectStream = onSelectStream,
+                                onChannelPageUp = onChannelPageUp,
+                                onChannelPageDown = onChannelPageDown,
+                                isFirstItem = index == 0,
+                                isLastItem = index == displayedChannels.size - 1
+                            )
                         }
                     }
                 }
@@ -1487,7 +1321,9 @@ fun TiviMateGuideScreen(
                     selectedLanguages[channel.id] ?: channel.defaultLanguage,
                     selectedQualities[channel.id] ?: channel.defaultQuality
                 )
-                onPlayChannel(stream)
+                if (activeChannel?.id != stream.id) {
+                    onPlayChannel(stream)
+                }
                 onOpenFullscreen()
             },
             onDismiss = {
@@ -1633,6 +1469,226 @@ private fun TiviMateProgramSlotCard(
                             .background(if (isFocused) Color.White else TvColors.Focus)
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TiviMateChannelRow(
+    item: UnifiedChannel,
+    index: Int,
+    isTargetFocused: Boolean,
+    isPlayingThis: Boolean,
+    selectedLanguage: String?,
+    selectedQuality: String?,
+    programme: Programme?,
+    channelFocusRequester: FocusRequester,
+    categoryFocusRequester: FocusRequester,
+    onFocused: () -> Unit,
+    onSelectStream: (Channel) -> Unit,
+    onChannelPageUp: () -> Unit,
+    onChannelPageDown: () -> Unit,
+    isFirstItem: Boolean,
+    isLastItem: Boolean
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val streamChannel = remember(item, selectedLanguage, selectedQuality) {
+        item.getStreamFor(
+            selectedLanguage ?: item.defaultLanguage,
+            selectedQuality ?: item.defaultQuality
+        )
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+    ) {
+        // 1. PINNED LEFT CHANNEL CARD (Fixed ~240dp width)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .width(240.dp)
+                .height(48.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(
+                    when {
+                        isFocused -> TvColors.Focus
+                        isPlayingThis -> TvColors.SurfaceRaised
+                        else -> TvColors.Surface
+                    }
+                )
+                .border(
+                    BorderStroke(
+                        if (isFocused) 1.5.dp else 1.dp,
+                        if (isFocused) TvColors.FocusGlow else TvColors.BorderSubtle
+                    ),
+                    RoundedCornerShape(6.dp)
+                )
+                .then(if (isTargetFocused) Modifier.focusRequester(channelFocusRequester) else Modifier)
+                .onFocusChanged {
+                    isFocused = it.isFocused
+                    if (it.isFocused) {
+                        onFocused()
+                    }
+                }
+                .clickable {
+                    onSelectStream(streamChannel)
+                }
+                .onPreviewKeyEvent { event ->
+                    if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                        when (event.nativeKeyEvent.keyCode) {
+                            KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
+                                onChannelPageUp()
+                                true
+                            }
+                            KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
+                                onChannelPageDown()
+                                true
+                            }
+                            KeyEvent.KEYCODE_DPAD_UP -> {
+                                if (isFirstItem) true else false
+                            }
+                            KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                if (isLastItem) true else false
+                            }
+                            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                categoryFocusRequester.requestFocus()
+                                true
+                            }
+                            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                                onSelectStream(streamChannel)
+                                true
+                            }
+                            else -> false
+                        }
+                    } else false
+                }
+                .focusable()
+                .padding(horizontal = 8.dp)
+        ) {
+            // Channel Number
+            Text(
+                text = "${index + 1}",
+                color = if (isFocused) Color.White.copy(alpha = 0.85f) else TvColors.TextMuted,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = TvFonts.Body,
+                modifier = Modifier.width(26.dp)
+            )
+
+            // Logo
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(TvColors.Background)
+            ) {
+                if (!item.cover.isNullOrEmpty()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(item.cover)
+                            .size(96, 96)
+                            .crossfade(false)
+                            .build(),
+                        contentDescription = item.baseName,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(24.dp)
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Rounded.Tv,
+                        contentDescription = null,
+                        tint = TvColors.TextMuted,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Channel Name
+            Text(
+                text = item.baseName,
+                color = if (isFocused) Color.White else TvColors.TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = TvFonts.Body,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+
+            // Badges: Language & Quality & Favorite
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Full Title Case Language (Hidden if blank)
+                val currentLang = remember(selectedLanguage, item.defaultLanguage) {
+                    TiviMateChannelParser.normalizeLanguage(
+                        selectedLanguage ?: item.defaultLanguage
+                    )
+                }
+                if (currentLang.isNotBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (isFocused) Color.Black.copy(alpha = 0.3f) else TvColors.BadgeBackground)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = currentLang,
+                            color = if (isFocused) Color.White else TvColors.Accent,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = TvFonts.Body
+                        )
+                    }
+                }
+
+                if (item.isFavorite) {
+                    Icon(
+                        imageVector = Icons.Rounded.Favorite,
+                        contentDescription = "Favorite",
+                        tint = if (isFocused) Color.White else TvColors.Danger,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.width(6.dp))
+
+        // 2. HORIZONTALLY SCROLLABLE PROGRAM TIMELINE (Zero nested LazyRow overhead)
+        val timelineShows = remember(item.baseName, item.category, programme) {
+            getChannelTimelineShows(
+                channelName = item.baseName,
+                category = item.category,
+                programme = programme
+            )
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(rememberScrollState())
+        ) {
+            timelineShows.forEachIndexed { slotIdx, show ->
+                TiviMateProgramSlotCard(
+                    show = show,
+                    onSelect = {
+                        onSelectStream(streamChannel)
+                    },
+                    onNavigateLeft = if (slotIdx == 0) {
+                        { channelFocusRequester.requestFocus() }
+                    } else null
+                )
             }
         }
     }
@@ -2204,7 +2260,11 @@ private fun TiviMateSearchDialog(
                                 ) {
                                     if (!channel.cover.isNullOrEmpty()) {
                                         AsyncImage(
-                                            model = channel.cover,
+                                            model = ImageRequest.Builder(LocalContext.current)
+                                                .data(channel.cover)
+                                                .size(96, 96)
+                                                .crossfade(false)
+                                                .build(),
                                             contentDescription = channel.baseName,
                                             contentScale = ContentScale.Fit,
                                             modifier = Modifier.size(26.dp)

@@ -87,6 +87,7 @@ import androidx.media3.common.TrackSelectionParameters
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.m3u.data.database.model.Channel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -591,7 +592,11 @@ fun TiviMatePlayerScreen(
                             val coverUrl = channel?.cover ?: currentUnified?.cover
                             if (!coverUrl.isNullOrEmpty()) {
                                 AsyncImage(
-                                    model = coverUrl,
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(coverUrl)
+                                        .size(160, 160)
+                                        .crossfade(false)
+                                        .build(),
                                     contentDescription = channel?.title,
                                     contentScale = ContentScale.Fit,
                                     modifier = Modifier.size(46.dp)
@@ -984,7 +989,9 @@ fun TiviMatePlayerScreen(
                                     if (isRecording) {
                                         stopAndSaveRecording()
                                     }
-                                    onSwitchChannel(ch)
+                                    if (channel?.id != ch.id) {
+                                        onSwitchChannel(ch)
+                                    }
                                     showQuickChannelDrawer = false
                                     try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
                                 }
@@ -995,7 +1002,9 @@ fun TiviMatePlayerScreen(
                                                 if (isRecording) {
                                                     stopAndSaveRecording()
                                                 }
-                                                onSwitchChannel(ch)
+                                                if (channel?.id != ch.id) {
+                                                    onSwitchChannel(ch)
+                                                }
                                                 showQuickChannelDrawer = false
                                                 try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
                                                 true

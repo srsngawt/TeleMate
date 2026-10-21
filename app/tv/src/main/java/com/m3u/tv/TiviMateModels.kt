@@ -194,10 +194,23 @@ object TiviMateChannelParser {
         }
     }
 
+    @Volatile
+    private var lastRawChannelsRef: List<Channel>? = null
+    @Volatile
+    private var lastGroupedList: List<UnifiedChannel>? = null
+
     fun groupChannels(
         channels: List<Channel>,
         favoriteIds: Set<Int>
     ): List<UnifiedChannel> {
+        val cached = lastGroupedList
+        if (cached != null && lastRawChannelsRef === channels) {
+            return cached.map { uc ->
+                val isFav = uc.variants.any { it.channel.id in favoriteIds }
+                if (uc.isFavorite == isFav) uc else uc.copy(isFavorite = isFav)
+            }
+        }
+
         val grouped = LinkedHashMap<String, MutableList<Triple<Channel, String, String>>>()
 
         for (ch in channels) {
@@ -206,7 +219,7 @@ object TiviMateChannelParser {
             grouped.getOrPut(key) { mutableListOf() }.add(Triple(ch, lang, qual))
         }
 
-        return grouped.values.map { list ->
+        val result = grouped.values.map { list ->
             val first = list.first().first
             val (baseName, _, _) = parseChannel(first)
 
@@ -268,5 +281,8 @@ object TiviMateChannelParser {
                 defaultQuality = defaultQual
             )
         }
+        lastRawChannelsRef = channels
+        lastGroupedList = result
+        return result
     }
 }

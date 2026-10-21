@@ -200,6 +200,9 @@ class TvHomeViewModel @Inject constructor(
     }
 
     fun play(channel: Channel) {
+        if (currentChannel.value?.id == channel.id && player.value?.playbackState != Player.STATE_IDLE && player.value?.playbackState != Player.STATE_ENDED) {
+            return
+        }
         viewModelScope.launch {
             playerManager.play(MediaCommand.Common(channel.id))
             channelRepository.reportPlayed(channel.id)
@@ -822,15 +825,17 @@ class TvHomeViewModel @Inject constructor(
                 .observeAllByPlaylistUrl(url)
                 .flowOn(Dispatchers.IO)
                 .collect { rawChannels ->
-                    val channels = rawChannels
-                        .filterNot { it.hidden }
-                        .sortedWith(
-                            localeAwareComparator(
-                                primarySelector = Channel::category,
-                                secondarySelector = Channel::title,
-                                locale = sortLocale,
+                    val channels = withContext(Dispatchers.Default) {
+                        rawChannels
+                            .filterNot { it.hidden }
+                            .sortedWith(
+                                localeAwareComparator(
+                                    primarySelector = Channel::category,
+                                    secondarySelector = Channel::title,
+                                    locale = sortLocale,
+                                )
                             )
-                        )
+                    }
                     _state.update { state ->
                         if (state.selectedPlaylist?.url == url) {
                             state.copy(
