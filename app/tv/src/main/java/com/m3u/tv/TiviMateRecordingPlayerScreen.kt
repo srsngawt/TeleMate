@@ -162,52 +162,38 @@ fun TiviMateRecordingPlayerScreen(
             .focusRequester(rootFocusRequester)
             .onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                    when (event.nativeKeyEvent.keyCode) {
-                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                            onPlayPause()
-                            showControls = true
-                            controlsInteractionTimestamp = System.currentTimeMillis()
-                            try { playPauseFocusRequester.requestFocus() } catch (_: Exception) {}
-                            true
+                    if (!showControls) {
+                        when (event.nativeKeyEvent.keyCode) {
+                            KeyEvent.KEYCODE_DPAD_CENTER,
+                            KeyEvent.KEYCODE_ENTER,
+                            KeyEvent.KEYCODE_DPAD_UP,
+                            KeyEvent.KEYCODE_DPAD_DOWN,
+                            KeyEvent.KEYCODE_DPAD_LEFT,
+                            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                showControls = true
+                                controlsInteractionTimestamp = System.currentTimeMillis()
+                                try { playPauseFocusRequester.requestFocus() } catch (_: Exception) {}
+                                true
+                            }
+                            KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                                onPlayPause()
+                                true
+                            }
+                            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
+                                seekBy(10000L)
+                                true
+                            }
+                            KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                                seekBy(-10000L)
+                                true
+                            }
+                            KeyEvent.KEYCODE_BACK -> {
+                                onClose()
+                                true
+                            }
+                            else -> false
                         }
-                        KeyEvent.KEYCODE_DPAD_LEFT -> {
-                            seekBy(-10000L)
-                            controlsInteractionTimestamp = System.currentTimeMillis()
-                            true
-                        }
-                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            seekBy(10000L)
-                            controlsInteractionTimestamp = System.currentTimeMillis()
-                            true
-                        }
-                        KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
-                            showControls = true
-                            controlsInteractionTimestamp = System.currentTimeMillis()
-                            try { playPauseFocusRequester.requestFocus() } catch (_: Exception) {}
-                            true
-                        }
-                        KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                            onPlayPause()
-                            showControls = true
-                            controlsInteractionTimestamp = System.currentTimeMillis()
-                            true
-                        }
-                        KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-                            seekBy(10000L)
-                            controlsInteractionTimestamp = System.currentTimeMillis()
-                            true
-                        }
-                        KeyEvent.KEYCODE_MEDIA_REWIND -> {
-                            seekBy(-10000L)
-                            controlsInteractionTimestamp = System.currentTimeMillis()
-                            true
-                        }
-                        KeyEvent.KEYCODE_BACK -> {
-                            onClose()
-                            true
-                        }
-                        else -> false
-                    }
+                    } else false // When showControls == true, DO NOT intercept! Let child buttons handle navigation and actions!
                 } else false
             }
             .clickable { showControls = !showControls }

@@ -109,7 +109,6 @@ fun TiviMatePlayerScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var showInfobar by remember { mutableStateOf(true) }
-    var focusControlsOnShow by remember { mutableStateOf(false) }
     var showQuickChannelDrawer by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
     var recordingSeconds by remember { mutableStateOf(0) }
@@ -192,26 +191,14 @@ fun TiviMatePlayerScreen(
                 } catch (_: Exception) {}
             }
             showInfobar -> {
-                if (focusControlsOnShow) {
-                    delay(80)
-                    try {
-                        if (liveDelaySeconds > 0) {
-                            sliderFocusRequester.requestFocus()
-                        } else {
-                            actionButtonsFocusRequester.requestFocus()
-                        }
-                    } catch (_: Exception) {}
-                } else {
-                    delay(50)
-                    try {
-                        playerFocusRequester.requestFocus()
-                    } catch (_: Exception) {}
-                }
+                delay(80)
+                try {
+                    actionButtonsFocusRequester.requestFocus()
+                } catch (_: Exception) {}
             }
             else -> {
                 // When ALL overlays (infobar, drawer, dialogs) close:
                 // Focus MUST be immediately returned to the root player!
-                focusControlsOnShow = false
                 delay(50)
                 try {
                     playerFocusRequester.requestFocus()
@@ -318,18 +305,17 @@ fun TiviMatePlayerScreen(
 
     LaunchedEffect(channel?.id) {
         showInfobar = true
-        focusControlsOnShow = false
         liveDelaySeconds = 0L
-        delay(50)
+        delay(80)
         try {
-            playerFocusRequester.requestFocus()
+            actionButtonsFocusRequester.requestFocus()
         } catch (_: Exception) {}
     }
 
     LaunchedEffect(Unit) {
-        delay(150)
+        delay(120)
         try {
-            playerFocusRequester.requestFocus()
+            actionButtonsFocusRequester.requestFocus()
         } catch (_: Exception) {}
     }
 
@@ -348,125 +334,74 @@ fun TiviMatePlayerScreen(
                 .clickable {
                     if (!isAnyPopupOpen && !showQuickChannelDrawer) {
                         showInfobar = !showInfobar
-                        if (!showInfobar) focusControlsOnShow = false
                     }
                 }
                 .onPreviewKeyEvent { event ->
                     if (isAnyPopupOpen) return@onPreviewKeyEvent false
                     val action = event.nativeKeyEvent.action
                     val keyCode = event.nativeKeyEvent.keyCode
-                if (action == KeyEvent.ACTION_DOWN) {
-                    when (keyCode) {
-                        KeyEvent.KEYCODE_MENU -> {
-                            if (!showLanguageDialog && !showQualityDialog) {
-                                showQuickChannelDrawer = !showQuickChannelDrawer
-                                showInfobar = false
-                                focusControlsOnShow = false
-                                true
-                            } else false
-                        }
-                        KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
-                            zapNext()
-                            true
-                        }
-                        KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
-                            zapPrev()
-                            true
-                        }
-                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                            if (!showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
-                                onBackToGuide()
-                                true
-                            } else false
-                        }
-                        KeyEvent.KEYCODE_DPAD_UP -> {
-                            if (!showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
-                                if (showInfobar) {
-                                    focusControlsOnShow = true
-                                    try {
-                                        if (liveDelaySeconds > 0) {
-                                            sliderFocusRequester.requestFocus()
-                                        } else {
-                                            actionButtonsFocusRequester.requestFocus()
-                                        }
-                                    } catch (_: Exception) {}
-                                } else {
-                                    focusControlsOnShow = true
+                    if (action == KeyEvent.ACTION_DOWN) {
+                        if (!showInfobar && !showQuickChannelDrawer) {
+                            when (keyCode) {
+                                KeyEvent.KEYCODE_DPAD_UP -> {
                                     showInfobar = true
                                     coroutineScope.launch {
-                                        delay(80)
-                                        try {
-                                            if (liveDelaySeconds > 0) {
-                                                sliderFocusRequester.requestFocus()
-                                            } else {
-                                                actionButtonsFocusRequester.requestFocus()
-                                            }
-                                        } catch (_: Exception) {}
-                                    }
-                                }
-                                true
-                            } else false
-                        }
-                        KeyEvent.KEYCODE_DPAD_DOWN -> {
-                            if (!showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
-                                if (showInfobar) {
-                                    showInfobar = false
-                                    focusControlsOnShow = false
-                                    try {
-                                        playerFocusRequester.requestFocus()
-                                    } catch (_: Exception) {}
-                                } else {
-                                    focusControlsOnShow = true
-                                    showInfobar = true
-                                    coroutineScope.launch {
-                                        delay(80)
+                                        delay(60)
                                         try {
                                             actionButtonsFocusRequester.requestFocus()
                                         } catch (_: Exception) {}
                                     }
-                                }
-                                true
-                            } else false
-                        }
-                        KeyEvent.KEYCODE_DPAD_LEFT -> {
-                            if (!showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
-                                if (showInfobar) {
-                                    focusControlsOnShow = true
-                                    try {
-                                        actionButtonsFocusRequester.requestFocus()
-                                    } catch (_: Exception) {}
-                                } else {
-                                    showQuickChannelDrawer = true
-                                }
-                                true
-                            } else false
-                        }
-                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            if (!showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
-                                if (showInfobar) {
-                                    focusControlsOnShow = true
-                                    try {
-                                        actionButtonsFocusRequester.requestFocus()
-                                    } catch (_: Exception) {}
                                     true
-                                } else false
+                                }
+                                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                    showInfobar = true
+                                    coroutineScope.launch {
+                                        delay(60)
+                                        try {
+                                            actionButtonsFocusRequester.requestFocus()
+                                        } catch (_: Exception) {}
+                                    }
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                                    onBackToGuide()
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MENU -> {
+                                    showQuickChannelDrawer = true
+                                    true
+                                }
+                                KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
+                                    zapNext()
+                                    true
+                                }
+                                KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
+                                    zapPrev()
+                                    true
+                                }
+                                KeyEvent.KEYCODE_BACK -> {
+                                    onBackToGuide()
+                                    true
+                                }
+                                else -> false
+                            }
+                        } else {
+                            if (keyCode == KeyEvent.KEYCODE_BACK) {
+                                when {
+                                    showQuickChannelDrawer -> { showQuickChannelDrawer = false; true }
+                                    showInfobar -> {
+                                        showInfobar = false
+                                        try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
+                                        true
+                                    }
+                                    else -> false
+                                }
                             } else false
                         }
-                        KeyEvent.KEYCODE_BACK -> {
-                            when {
-                                showLanguageDialog -> { showLanguageDialog = false; true }
-                                showQualityDialog -> { showQualityDialog = false; true }
-                                showQuickChannelDrawer -> { showQuickChannelDrawer = false; true }
-                                showInfobar -> { showInfobar = false; focusControlsOnShow = false; true }
-                                else -> { onBackToGuide(); true }
-                            }
-                        }
-                        else -> false
-                    }
-                } else false
-            }
+                    } else false
+                }
             .focusable()
-    ) {
+        ) {
         // 1. FULLSCREEN VIDEO PLAYER
         if (player != null) {
             key(channel?.id, player) {
@@ -718,7 +653,6 @@ fun TiviMatePlayerScreen(
 
                 val closeControlsAndFocusPlayer: () -> Unit = {
                     showInfobar = false
-                    focusControlsOnShow = false
                     try {
                         playerFocusRequester.requestFocus()
                     } catch (_: Exception) {}

@@ -2391,159 +2391,197 @@ private fun TiviMateRecordingsDialog(
                         .padding(vertical = 8.dp)
                 ) {
                     itemsIndexed(recordings, key = { _, rec -> rec.id }) { index, rec ->
-                        var isItemFocused by remember { mutableStateOf(false) }
+                        var isPlayFocused by remember { mutableStateOf(false) }
+                        var isDeleteFocused by remember { mutableStateOf(false) }
                         val isFirst = index == 0
                         val isLast = index == recordings.size - 1
 
-                        val itemModifier = if (isFirst) {
+                        val playItemModifier = if (isFirst) {
                             Modifier.focusRequester(firstItemFocusRequester)
                         } else Modifier
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = itemModifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isItemFocused) TvColors.Focus else TvColors.SurfaceRaised)
-                                .border(
-                                    BorderStroke(1.dp, if (isItemFocused) TvColors.FocusGlow else TvColors.BorderSubtle),
-                                    RoundedCornerShape(8.dp)
-                                )
-                                .onFocusChanged { isItemFocused = it.isFocused }
-                                .clickable { onPlayRecording(rec) }
-                                .onPreviewKeyEvent { event ->
-                                    if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                                        when (event.nativeKeyEvent.keyCode) {
-                                            KeyEvent.KEYCODE_DPAD_CENTER,
-                                            KeyEvent.KEYCODE_ENTER -> {
-                                                onPlayRecording(rec)
-                                                true
-                                            }
-                                            KeyEvent.KEYCODE_DPAD_UP -> {
-                                                if (isFirst) {
-                                                    closeFocusRequester.requestFocus()
-                                                    true
-                                                } else false
-                                            }
-                                            KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                                if (isLast) {
-                                                    bottomBtnFocusRequester.requestFocus()
-                                                    true
-                                                } else false
-                                            }
-                                            KeyEvent.KEYCODE_DPAD_LEFT,
-                                            KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                                                true // Trap focus horizontally
-                                            }
-                                            else -> false
-                                        }
-                                    } else false
-                                }
-                                .focusable()
-                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
+                            // 1. Play Recording Button / Card
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                if (!rec.coverUrl.isNullOrBlank()) {
-                                    AsyncImage(
-                                        model = rec.coverUrl,
-                                        contentDescription = rec.channelName,
-                                        contentScale = ContentScale.Fit,
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(Color.Black.copy(alpha = 0.4f))
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = playItemModifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isPlayFocused) TvColors.Focus else TvColors.SurfaceRaised)
+                                    .border(
+                                        BorderStroke(1.2.dp, if (isPlayFocused) TvColors.FocusGlow else TvColors.BorderSubtle),
+                                        RoundedCornerShape(8.dp)
                                     )
-                                } else {
-                                    Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(TvColors.SurfaceHighlight)
+                                    .onFocusChanged { isPlayFocused = it.isFocused }
+                                    .clickable { onPlayRecording(rec) }
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                            when (event.nativeKeyEvent.keyCode) {
+                                                KeyEvent.KEYCODE_DPAD_CENTER,
+                                                KeyEvent.KEYCODE_ENTER -> {
+                                                    onPlayRecording(rec)
+                                                    true
+                                                }
+                                                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                                    true // Trap focus on left
+                                                }
+                                                KeyEvent.KEYCODE_DPAD_UP -> {
+                                                    if (isFirst) {
+                                                        closeFocusRequester.requestFocus()
+                                                        true
+                                                    } else false
+                                                }
+                                                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                                    if (isLast) {
+                                                        bottomBtnFocusRequester.requestFocus()
+                                                        true
+                                                    } else false
+                                                }
+                                                else -> false
+                                            }
+                                        } else false
+                                    }
+                                    .focusable()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    if (!rec.coverUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = rec.coverUrl,
+                                            contentDescription = rec.channelName,
+                                            contentScale = ContentScale.Fit,
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(Color.Black.copy(alpha = 0.4f))
+                                        )
+                                    } else {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(TvColors.SurfaceHighlight)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Tv,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Column(
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Tv,
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(18.dp)
+                                        Text(
+                                            text = rec.channelName,
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = TvFonts.Body,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = rec.showTitle,
+                                            color = if (isPlayFocused) Color.White.copy(alpha = 0.9f) else TvColors.TextSecondary,
+                                            fontSize = 12.sp,
+                                            fontFamily = TvFonts.Body,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "🔴 ${rec.formattedDuration}  •  ${rec.formattedDate}",
+                                            color = if (isPlayFocused) Color.White.copy(alpha = 0.75f) else TvColors.TextMuted,
+                                            fontSize = 11.sp,
+                                            fontFamily = TvFonts.Body
                                         )
                                     }
                                 }
 
-                                Column(
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    Text(
-                                        text = rec.channelName,
-                                        color = Color.White,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = TvFonts.Body,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = rec.showTitle,
-                                        color = TvColors.TextSecondary,
-                                        fontSize = 12.sp,
-                                        fontFamily = TvFonts.Body,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "🔴 ${rec.formattedDuration}  •  ${rec.formattedDate}",
-                                        color = TvColors.TextMuted,
-                                        fontSize = 11.sp,
-                                        fontFamily = TvFonts.Body
-                                    )
-                                }
-                            }
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                // Play button
+                                // Play Indicator Icon
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
-                                        .size(32.dp)
+                                        .size(34.dp)
                                         .clip(CircleShape)
-                                        .background(TvColors.SurfaceHighlight)
-                                        .clickable { onPlayRecording(rec) }
+                                        .background(if (isPlayFocused) Color.White.copy(alpha = 0.25f) else TvColors.SurfaceHighlight)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.PlayArrow,
                                         contentDescription = "Play",
-                                        tint = TvColors.Focus,
-                                        modifier = Modifier.size(18.dp)
+                                        tint = if (isPlayFocused) Color.White else TvColors.Focus,
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
+                            }
 
-                                // Delete button
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .background(TvColors.SurfaceHighlight)
-                                        .clickable {
-                                            RecordingsManager.deleteRecording(context, rec.id)
-                                            recordings = RecordingsManager.getRecordings(context)
-                                        }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Delete,
-                                        contentDescription = "Delete",
-                                        tint = TvColors.Danger,
-                                        modifier = Modifier.size(16.dp)
+                            // 2. Delete Recording Button
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isDeleteFocused) TvColors.Danger else TvColors.SurfaceRaised)
+                                    .border(
+                                        BorderStroke(
+                                            if (isDeleteFocused) 1.5.dp else 1.dp,
+                                            if (isDeleteFocused) Color.White else TvColors.BorderSubtle
+                                        ),
+                                        RoundedCornerShape(8.dp)
                                     )
-                                }
+                                    .onFocusChanged { isDeleteFocused = it.isFocused }
+                                    .clickable {
+                                        RecordingsManager.deleteRecording(context, rec.id)
+                                        recordings = RecordingsManager.getRecordings(context)
+                                    }
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                            when (event.nativeKeyEvent.keyCode) {
+                                                KeyEvent.KEYCODE_DPAD_CENTER,
+                                                KeyEvent.KEYCODE_ENTER -> {
+                                                    RecordingsManager.deleteRecording(context, rec.id)
+                                                    recordings = RecordingsManager.getRecordings(context)
+                                                    true
+                                                }
+                                                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                                    true // Trap focus on right
+                                                }
+                                                KeyEvent.KEYCODE_DPAD_UP -> {
+                                                    if (isFirst) {
+                                                        closeFocusRequester.requestFocus()
+                                                        true
+                                                    } else false
+                                                }
+                                                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                                    if (isLast) {
+                                                        bottomBtnFocusRequester.requestFocus()
+                                                        true
+                                                    } else false
+                                                }
+                                                else -> false
+                                            }
+                                        } else false
+                                    }
+                                    .focusable()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Delete,
+                                    contentDescription = "Delete Recording",
+                                    tint = if (isDeleteFocused) Color.White else TvColors.Danger,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
                     }
