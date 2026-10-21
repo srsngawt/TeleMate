@@ -191,9 +191,13 @@ fun TiviMatePlayerScreen(
                 // Dialog handles its own focus
             }
             showQuickChannelDrawer -> {
-                delay(100)
+                showInfobar = false
+                val targetIndex = currentChannelIndex.coerceIn(0, maxOf(0, activeZapList.size - 1))
                 try {
-                    drawerListState.scrollToItem(maxOf(0, currentChannelIndex - 2))
+                    drawerListState.scrollToItem(maxOf(0, targetIndex - 2))
+                } catch (_: Exception) {}
+                delay(80)
+                try {
                     drawerFocusRequester.requestFocus()
                 } catch (_: Exception) {}
             }
@@ -423,6 +427,7 @@ fun TiviMatePlayerScreen(
                                     true
                                 }
                                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MENU -> {
+                                    showInfobar = false
                                     showQuickChannelDrawer = true
                                     true
                                 }
@@ -443,16 +448,12 @@ fun TiviMatePlayerScreen(
                         } else {
                             if (showQuickChannelDrawer) {
                                 when (keyCode) {
-                                    KeyEvent.KEYCODE_DPAD_LEFT -> {
-                                        try { drawerFocusRequester.requestFocus() } catch (_: Exception) {}
-                                        true
-                                    }
                                     KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_BACK -> {
                                         showQuickChannelDrawer = false
                                         try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
                                         true
                                     }
-                                    else -> true // Trap keys while drawer is open
+                                    else -> false
                                 }
                             } else if (keyCode == KeyEvent.KEYCODE_BACK) {
                                 if (showInfobar) {
@@ -786,9 +787,26 @@ fun TiviMatePlayerScreen(
                                 isRecording = true
                                 recordingSeconds = 0
                                 recordingStartTimeMs = System.currentTimeMillis()
-                                val channelUrl = channel?.url ?: ""
-                                if (channelUrl.isNotBlank()) {
-                                    StreamRecorder.start(context, recId, channelUrl)
+                                val currentPlayingUrl = player?.currentMediaItem?.localConfiguration?.uri?.toString()
+                                    ?.takeIf { it.isNotBlank() } ?: channel?.url ?: ""
+                                val targetVideoHeight = run {
+                                    var h = player?.videoSize?.height ?: 0
+                                    if (h <= 0) {
+                                        player?.currentTracks?.groups?.forEach { group ->
+                                            if (group.type == C.TRACK_TYPE_VIDEO) {
+                                                for (i in 0 until group.length) {
+                                                    if (group.isTrackSelected(i)) {
+                                                        val format = group.getTrackFormat(i)
+                                                        if (format.height > h) h = format.height
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    h
+                                }
+                                if (currentPlayingUrl.isNotBlank()) {
+                                    StreamRecorder.start(context, recId, currentPlayingUrl, targetHeight = targetVideoHeight)
                                 }
                                 zappingToastText = "🔴 Recording started: ${channel?.title ?: "Stream"}"
                             } else {
@@ -812,7 +830,10 @@ fun TiviMatePlayerScreen(
                         onNavigateUp = { sliderFocusRequester.requestFocus() },
                         onNavigateDown = closeControlsAndFocusPlayer,
                         onNavigateRight = { /* Trap focus on right */ },
-                        onClick = { showQuickChannelDrawer = true }
+                        onClick = {
+                            showInfobar = false
+                            showQuickChannelDrawer = true
+                        }
                     )
                 }
             }
@@ -940,6 +961,9 @@ fun TiviMatePlayerScreen(
                                 .then(if (index == currentChannelIndex) Modifier.focusRequester(drawerFocusRequester) else Modifier)
                                 .onFocusChanged { isFocused = it.isFocused }
                                 .clickable {
+                                    if (isRecording) {
+                                        stopAndSaveRecording()
+                                    }
                                     onSwitchChannel(ch)
                                     showQuickChannelDrawer = false
                                     try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
@@ -948,6 +972,9 @@ fun TiviMatePlayerScreen(
                                     if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                                         when (keyEvent.nativeKeyEvent.keyCode) {
                                             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                                                if (isRecording) {
+                                                    stopAndSaveRecording()
+                                                }
                                                 onSwitchChannel(ch)
                                                 showQuickChannelDrawer = false
                                                 try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
@@ -955,8 +982,7 @@ fun TiviMatePlayerScreen(
                                             }
                                             KeyEvent.KEYCODE_DPAD_UP -> {
                                                 if (index == 0) {
-                                                    drawerCloseFocusRequester.requestFocus()
-                                                    true
+                                                    true // Trap at top channel so focus remains predictable
                                                 } else false
                                             }
                                             KeyEvent.KEYCODE_DPAD_DOWN -> {

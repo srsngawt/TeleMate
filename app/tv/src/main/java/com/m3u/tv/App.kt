@@ -199,21 +199,6 @@ fun App(
             }
         }
 
-        remoteControlCode?.let { code ->
-            val displayCode = code.toString().padStart(6, '0')
-            Text(
-                text = "Pair: $displayCode",
-                color = TvColors.TextMuted,
-                fontFamily = TvFonts.Body,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 24.dp, bottom = 12.dp)
-                    .background(TvColors.Surface.copy(alpha = 0.85f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            )
-        }
 
         if (showExitDialog) {
             TiviMateExitDialog(

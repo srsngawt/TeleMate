@@ -260,21 +260,40 @@ fun TiviMateRecordingPlayerScreen(
 
     // Auto-hide controls after 5 seconds of inactivity, and manage remote focus
     val playPauseFocusRequester = remember { FocusRequester() }
+    val rewindFocusRequester = remember { FocusRequester() }
+    val forwardFocusRequester = remember { FocusRequester() }
+    val exitFocusRequester = remember { FocusRequester() }
     val rootFocusRequester = remember { FocusRequester() }
     val topCloseFocusRequester = remember { FocusRequester() }
     var controlsInteractionTimestamp by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
-    LaunchedEffect(showControls, controlsInteractionTimestamp) {
-        if (showControls) {
-            delay(100)
+    val hasEnded = currentPosMs >= totalDurationMs
+    LaunchedEffect(hasEnded) {
+        if (hasEnded) {
+            showControls = true
+            delay(80)
             try {
                 playPauseFocusRequester.requestFocus()
             } catch (_: Exception) {}
-            delay(5000)
-            showControls = false
+        }
+    }
+
+    LaunchedEffect(showControls, controlsInteractionTimestamp, isPlaying, hasEnded) {
+        if (showControls) {
+            delay(80)
             try {
-                rootFocusRequester.requestFocus()
+                playPauseFocusRequester.requestFocus()
             } catch (_: Exception) {}
+            // ONLY auto-hide if actively playing and video has NOT ended!
+            if (isPlaying && !hasEnded) {
+                delay(5000)
+                if (isPlaying && currentPosMs < totalDurationMs) {
+                    showControls = false
+                    try {
+                        rootFocusRequester.requestFocus()
+                    } catch (_: Exception) {}
+                }
+            }
         } else {
             delay(50)
             try {
@@ -291,16 +310,7 @@ fun TiviMateRecordingPlayerScreen(
         }
     }
 
-
-
-    BackHandler(enabled = showControls) {
-        showControls = false
-        try {
-            rootFocusRequester.requestFocus()
-        } catch (_: Exception) {}
-    }
-
-    BackHandler(enabled = !showControls) {
+    BackHandler {
         handleExit()
     }
 
@@ -333,8 +343,10 @@ fun TiviMateRecordingPlayerScreen(
             isPlaying = true
         } else if (recordingPlayer.isPlaying) {
             recordingPlayer.pause()
+            isPlaying = false
         } else {
             recordingPlayer.play()
+            isPlaying = true
         }
         showControls = true
         controlsInteractionTimestamp = System.currentTimeMillis()
@@ -347,8 +359,13 @@ fun TiviMateRecordingPlayerScreen(
             .focusRequester(rootFocusRequester)
             .onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                    val keyCode = event.nativeKeyEvent.keyCode
+                    if (keyCode == KeyEvent.KEYCODE_BACK) {
+                        handleExit()
+                        return@onPreviewKeyEvent true
+                    }
                     if (!showControls) {
-                        when (event.nativeKeyEvent.keyCode) {
+                        when (keyCode) {
                             KeyEvent.KEYCODE_DPAD_CENTER,
                             KeyEvent.KEYCODE_ENTER,
                             KeyEvent.KEYCODE_DPAD_UP,
@@ -370,10 +387,6 @@ fun TiviMateRecordingPlayerScreen(
                             }
                             KeyEvent.KEYCODE_MEDIA_REWIND -> {
                                 seekBy(-10000L)
-                                true
-                            }
-                            KeyEvent.KEYCODE_BACK -> {
-                                handleExit()
                                 true
                             }
                             else -> false
@@ -518,7 +531,8 @@ fun TiviMateRecordingPlayerScreen(
                         onNavigateDown = { playPauseFocusRequester.requestFocus() },
                         onNavigateUp = { /* trap */ },
                         onNavigateLeft = { /* trap */ },
-                        onNavigateRight = { /* trap */ }
+                        onNavigateRight = { /* trap */ },
+                        onBack = handleExit
                     )
                 }
 
@@ -596,58 +610,79 @@ fun TiviMateRecordingPlayerScreen(
                             RecordingControlButton(
                                 icon = Icons.Rounded.Replay10,
                                 label = "-10s",
+                                focusRequester = rewindFocusRequester,
                                 onClick = {
                                     controlsInteractionTimestamp = System.currentTimeMillis()
                                     seekBy(-10000L)
                                 },
                                 onNavigateLeft = { /* trap */ },
+                                onNavigateRight = { playPauseFocusRequester.requestFocus() },
                                 onNavigateUp = { topCloseFocusRequester.requestFocus() },
                                 onNavigateDown = {
-                                    showControls = false
-                                    rootFocusRequester.requestFocus()
-                                }
+                                    if (isPlaying && currentPosMs < totalDurationMs) {
+                                        showControls = false
+                                        rootFocusRequester.requestFocus()
+                                    }
+                                },
+                                onBack = handleExit
                             )
 
                             RecordingControlButton(
-                                icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                label = if (isPlaying) "Pause" else "Play",
+                                icon = if (isPlaying && currentPosMs < totalDurationMs) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                label = if (isPlaying && currentPosMs < totalDurationMs) "Pause" else "Play",
                                 onClick = {
                                     controlsInteractionTimestamp = System.currentTimeMillis()
                                     togglePlayPause()
                                 },
                                 focusRequester = playPauseFocusRequester,
                                 isPrimary = true,
+                                onNavigateLeft = { rewindFocusRequester.requestFocus() },
+                                onNavigateRight = { forwardFocusRequester.requestFocus() },
                                 onNavigateUp = { topCloseFocusRequester.requestFocus() },
                                 onNavigateDown = {
-                                    showControls = false
-                                    rootFocusRequester.requestFocus()
-                                }
+                                    if (isPlaying && currentPosMs < totalDurationMs) {
+                                        showControls = false
+                                        rootFocusRequester.requestFocus()
+                                    }
+                                },
+                                onBack = handleExit
                             )
 
                             RecordingControlButton(
                                 icon = Icons.Rounded.Forward10,
                                 label = "+10s",
+                                focusRequester = forwardFocusRequester,
                                 onClick = {
                                     controlsInteractionTimestamp = System.currentTimeMillis()
                                     seekBy(10000L)
                                 },
+                                onNavigateLeft = { playPauseFocusRequester.requestFocus() },
+                                onNavigateRight = { exitFocusRequester.requestFocus() },
                                 onNavigateUp = { topCloseFocusRequester.requestFocus() },
                                 onNavigateDown = {
-                                    showControls = false
-                                    rootFocusRequester.requestFocus()
-                                }
+                                    if (isPlaying && currentPosMs < totalDurationMs) {
+                                        showControls = false
+                                        rootFocusRequester.requestFocus()
+                                    }
+                                },
+                                onBack = handleExit
                             )
 
                             RecordingControlButton(
                                 icon = Icons.Rounded.Close,
                                 label = "Exit",
+                                focusRequester = exitFocusRequester,
                                 onClick = handleExit,
+                                onNavigateLeft = { forwardFocusRequester.requestFocus() },
                                 onNavigateRight = { /* trap */ },
                                 onNavigateUp = { topCloseFocusRequester.requestFocus() },
                                 onNavigateDown = {
-                                    showControls = false
-                                    rootFocusRequester.requestFocus()
-                                }
+                                    if (isPlaying && currentPosMs < totalDurationMs) {
+                                        showControls = false
+                                        rootFocusRequester.requestFocus()
+                                    }
+                                },
+                                onBack = handleExit
                             )
                         }
                     }
@@ -667,7 +702,8 @@ private fun RecordingControlButton(
     onNavigateUp: (() -> Unit)? = null,
     onNavigateDown: (() -> Unit)? = null,
     onNavigateLeft: (() -> Unit)? = null,
-    onNavigateRight: (() -> Unit)? = null
+    onNavigateRight: (() -> Unit)? = null,
+    onBack: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
 
@@ -722,6 +758,12 @@ private fun RecordingControlButton(
                         KeyEvent.KEYCODE_DPAD_RIGHT -> {
                             if (onNavigateRight != null) {
                                 onNavigateRight()
+                                true
+                            } else false
+                        }
+                        KeyEvent.KEYCODE_BACK -> {
+                            if (onBack != null) {
+                                onBack()
                                 true
                             } else false
                         }

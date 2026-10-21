@@ -393,6 +393,23 @@ fun TiviMateGuideScreen(
         }
     }
 
+    // Auto-Play in TV Guide: When focusedChannelIndex changes and user pauses on that channel, auto-play its video and audio in the mini player
+    LaunchedEffect(focusedChannelIndex, isGuideVisible, showSearchOverlay, showRecordingsDialog, showSettingsDialog) {
+        if (isGuideVisible && !showSearchOverlay && !showRecordingsDialog && !showSettingsDialog) {
+            if (focusedChannelIndex in displayedChannels.indices) {
+                delay(550)
+                val item = displayedChannels[focusedChannelIndex]
+                val stream = item.getStreamFor(
+                    selectedLanguages[item.id] ?: item.defaultLanguage,
+                    selectedQualities[item.id] ?: item.defaultQuality
+                )
+                if (activeChannel?.id != stream.id) {
+                    onPlayChannel(stream)
+                }
+            }
+        }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxSize()
@@ -2231,17 +2248,19 @@ private fun TiviMateRecordingsDialog(
 ) {
     BackHandler { onDismiss() }
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var recordings by remember { mutableStateOf(RecordingsManager.getRecordings(context)) }
+    var focusTargetIndex by remember { mutableStateOf<Int?>(null) }
 
     val closeFocusRequester = remember { FocusRequester() }
-    val firstItemFocusRequester = remember { FocusRequester() }
+    val targetItemFocusRequester = remember { FocusRequester() }
     val bottomBtnFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
         delay(100)
         try {
             if (recordings.isNotEmpty()) {
-                firstItemFocusRequester.requestFocus()
+                targetItemFocusRequester.requestFocus()
             } else {
                 bottomBtnFocusRequester.requestFocus()
             }
@@ -2324,7 +2343,7 @@ private fun TiviMateRecordingsDialog(
                                     }
                                     KeyEvent.KEYCODE_DPAD_DOWN -> {
                                         if (recordings.isNotEmpty()) {
-                                            firstItemFocusRequester.requestFocus()
+                                            targetItemFocusRequester.requestFocus()
                                         } else {
                                             bottomBtnFocusRequester.requestFocus()
                                         }
@@ -2406,9 +2425,10 @@ private fun TiviMateRecordingsDialog(
                         var isDeleteFocused by remember { mutableStateOf(false) }
                         val isFirst = index == 0
                         val isLast = index == recordings.size - 1
+                        val isTarget = index == (focusTargetIndex ?: 0)
 
-                        val playItemModifier = if (isFirst) {
-                            Modifier.focusRequester(firstItemFocusRequester)
+                        val playItemModifier = if (isTarget) {
+                            Modifier.focusRequester(targetItemFocusRequester)
                         } else Modifier
 
                         Row(
@@ -2556,6 +2576,33 @@ private fun TiviMateRecordingsDialog(
                                 }
                             }
 
+                            val deleteItem: () -> Unit = {
+                                RecordingsManager.deleteRecording(context, rec.id)
+                                val updated = RecordingsManager.getRecordings(context)
+                                if (updated.isEmpty()) {
+                                    recordings = updated
+                                    focusTargetIndex = null
+                                    coroutineScope.launch {
+                                        delay(80)
+                                        try {
+                                            bottomBtnFocusRequester.requestFocus()
+                                        } catch (_: Exception) {
+                                            try { closeFocusRequester.requestFocus() } catch (_: Exception) {}
+                                        }
+                                    }
+                                } else {
+                                    val nextIdx = index.coerceIn(0, updated.size - 1)
+                                    focusTargetIndex = nextIdx
+                                    recordings = updated
+                                    coroutineScope.launch {
+                                        delay(80)
+                                        try {
+                                            targetItemFocusRequester.requestFocus()
+                                        } catch (_: Exception) {}
+                                    }
+                                }
+                            }
+
                             // 2. Delete Recording Button
                             Box(
                                 contentAlignment = Alignment.Center,
@@ -2571,17 +2618,13 @@ private fun TiviMateRecordingsDialog(
                                         RoundedCornerShape(8.dp)
                                     )
                                     .onFocusChanged { isDeleteFocused = it.isFocused }
-                                    .clickable {
-                                        RecordingsManager.deleteRecording(context, rec.id)
-                                        recordings = RecordingsManager.getRecordings(context)
-                                    }
+                                    .clickable { deleteItem() }
                                     .onPreviewKeyEvent { event ->
                                         if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                                             when (event.nativeKeyEvent.keyCode) {
                                                 KeyEvent.KEYCODE_DPAD_CENTER,
                                                 KeyEvent.KEYCODE_ENTER -> {
-                                                    RecordingsManager.deleteRecording(context, rec.id)
-                                                    recordings = RecordingsManager.getRecordings(context)
+                                                    deleteItem()
                                                     true
                                                 }
                                                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
@@ -2648,7 +2691,7 @@ private fun TiviMateRecordingsDialog(
                                 }
                                 KeyEvent.KEYCODE_DPAD_UP -> {
                                     if (recordings.isNotEmpty()) {
-                                        firstItemFocusRequester.requestFocus()
+                                        targetItemFocusRequester.requestFocus()
                                     } else {
                                         closeFocusRequester.requestFocus()
                                     }

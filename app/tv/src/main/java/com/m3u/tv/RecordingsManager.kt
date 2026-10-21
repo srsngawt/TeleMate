@@ -74,7 +74,7 @@ object StreamRecorder {
             .build()
     }
 
-    fun start(context: Context, recId: String, streamUrl: String): String {
+    fun start(context: Context, recId: String, streamUrl: String, targetHeight: Int = 0): String {
         stop()
         val dir = File(context.filesDir, "recordings").apply { mkdirs() }
         val file = File(dir, "rec_${recId}.ts")
@@ -85,7 +85,7 @@ object StreamRecorder {
 
         recordingJob = CoroutineScope(Dispatchers.IO).launch {
             try {
-                recordStream(streamUrl, file)
+                recordStream(streamUrl, file, targetHeight)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -122,7 +122,58 @@ object StreamRecorder {
         }
     }
 
-    private suspend fun recordStream(streamUrl: String, outputFile: File) {
+    private data class HlsStreamVariant(
+        val url: String,
+        val width: Int,
+        val height: Int,
+        val bandwidth: Long
+    )
+
+    private fun selectBestVariantUrl(baseUrl: String, playlistText: String, targetHeight: Int): String {
+        val variants = mutableListOf<HlsStreamVariant>()
+        val lines = playlistText.lines()
+        var lastStreamInf: String? = null
+        for (line in lines) {
+            val trimmed = line.trim()
+            if (trimmed.startsWith("#EXT-X-STREAM-INF:")) {
+                lastStreamInf = trimmed
+            } else if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
+                if (lastStreamInf != null) {
+                    val resMatch = Regex("""RESOLUTION=(\d+)x(\d+)""").find(lastStreamInf)
+                    val w = resMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                    val h = resMatch?.groupValues?.get(2)?.toIntOrNull() ?: 0
+                    val bwMatch = Regex("""BANDWIDTH=(\d+)""").find(lastStreamInf)
+                    val bw = bwMatch?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+                    val resolvedUrl = resolveUrl(baseUrl, trimmed)
+                    variants.add(HlsStreamVariant(resolvedUrl, w, h, bw))
+                    lastStreamInf = null
+                } else {
+                    val resolvedUrl = resolveUrl(baseUrl, trimmed)
+                    variants.add(HlsStreamVariant(resolvedUrl, 0, 0, 0L))
+                }
+            }
+        }
+
+        if (variants.isEmpty()) return baseUrl
+
+        if (targetHeight > 0) {
+            val exact = variants.filter { it.height == targetHeight }
+            if (exact.isNotEmpty()) {
+                return exact.maxByOrNull { it.bandwidth }?.url ?: exact.first().url
+            }
+            val closest = variants.filter { it.height > 0 }.minByOrNull { kotlin.math.abs(it.height - targetHeight) }
+            if (closest != null) {
+                return closest.url
+            }
+        }
+
+        val highest = variants.maxByOrNull {
+            if (it.height > 0) it.height.toLong() * 10_000_000L + it.bandwidth else it.bandwidth
+        }
+        return highest?.url ?: variants.first().url
+    }
+
+    private suspend fun recordStream(streamUrl: String, outputFile: File, targetHeight: Int = 0) {
         val request = Request.Builder()
             .url(streamUrl)
             .header("User-Agent", "Mozilla/5.0 (Linux; Android TV) TeleMate/1.0")
@@ -156,7 +207,7 @@ object StreamRecorder {
         if (isHls) {
             val initialText = withContext(Dispatchers.IO) { body.string() }
             response.close()
-            recordHls(finalUrl, initialText, outputFile)
+            recordHls(finalUrl, initialText, outputFile, targetHeight)
         } else {
             withContext(Dispatchers.IO) {
                 body.byteStream().use { input ->
@@ -174,18 +225,12 @@ object StreamRecorder {
         }
     }
 
-    private suspend fun recordHls(initialUrl: String, initialText: String, outputFile: File) {
+    private suspend fun recordHls(initialUrl: String, initialText: String, outputFile: File, targetHeight: Int = 0) {
         var mediaPlaylistUrl = initialUrl
         var playlistText = initialText
 
         if (!playlistText.contains("#EXT-X-TARGETDURATION")) {
-            for (line in playlistText.lines()) {
-                val trimmed = line.trim()
-                if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
-                    mediaPlaylistUrl = resolveUrl(initialUrl, trimmed)
-                    break
-                }
-            }
+            mediaPlaylistUrl = selectBestVariantUrl(initialUrl, playlistText, targetHeight)
         }
 
         val downloadedSegments = LinkedHashSet<String>()
@@ -208,13 +253,7 @@ object StreamRecorder {
                     resp.close()
 
                     if (mediaText.contains("#EXT-X-STREAM-INF")) {
-                        for (line in mediaText.lines()) {
-                            val trimmed = line.trim()
-                            if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
-                                mediaPlaylistUrl = resolveUrl(mediaPlaylistUrl, trimmed)
-                                break
-                            }
-                        }
+                        mediaPlaylistUrl = selectBestVariantUrl(mediaPlaylistUrl, mediaText, targetHeight)
                         continue
                     }
 
