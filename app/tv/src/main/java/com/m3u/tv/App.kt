@@ -203,6 +203,10 @@ fun App(
         if (showExitDialog) {
             TiviMateExitDialog(
                 onConfirmExit = {
+                    try {
+                        viewModel.pauseOrContinue(false)
+                        activeRecording = null
+                    } catch (_: Exception) {}
                     (context as? Activity)?.finish()
                 },
                 onDismiss = {

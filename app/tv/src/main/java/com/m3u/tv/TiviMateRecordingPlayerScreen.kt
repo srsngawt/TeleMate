@@ -107,6 +107,30 @@ fun TiviMateRecordingPlayerScreen(
     var showControls by remember { mutableStateOf(true) }
     var playerDurationMs by remember { mutableLongStateOf(0L) }
 
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, recordingPlayer) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    try {
+                        recordingPlayer.pause()
+                    } catch (_: Exception) {}
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_DESTROY -> {
+                    try {
+                        recordingPlayer.stop()
+                        recordingPlayer.release()
+                    } catch (_: Exception) {}
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     DisposableEffect(recordingPlayer, localFile) {
         if (localFile != null) {
             val mediaItem = MediaItem.fromUri(Uri.fromFile(localFile))
