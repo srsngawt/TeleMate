@@ -1,5 +1,6 @@
 package com.m3u.tv
 
+import android.net.Uri
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Replay10
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -48,15 +50,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
+import java.io.File
 
 /**
  * Dedicated VOD Player for Recorded Shows on Android TV.
@@ -66,28 +72,60 @@ import kotlinx.coroutines.delay
  * - Fast-forward +10s / Rewind -10s
  * - Live playback scrubber/progress bar (Current Time / Total Duration)
  * - Show title, channel name, recording date
- * - ZERO Live TV clutter (No Record button, No TV Guide button, No channel switcher)
+ * - Completely isolated dedicated ExoPlayer (ZERO Live TV interference)
  */
 @Composable
 fun TiviMateRecordingPlayerScreen(
-    player: Player?,
     recording: TvRecording,
-    isPlaying: Boolean,
-    onPlayPause: () -> Unit,
     onClose: () -> Unit
 ) {
+    val context = LocalContext.current
+    val recordingPlayer = remember {
+        ExoPlayer.Builder(context).build().apply {
+            playWhenReady = true
+        }
+    }
+    var isPlaying by remember { mutableStateOf(true) }
+
+    DisposableEffect(recordingPlayer, recording.streamUrl) {
+        val file = File(recording.streamUrl)
+        val mediaItem = if (file.exists()) {
+            MediaItem.fromUri(Uri.fromFile(file))
+        } else {
+            MediaItem.fromUri(Uri.parse(recording.streamUrl))
+        }
+        recordingPlayer.setMediaItem(mediaItem)
+        recordingPlayer.prepare()
+        recordingPlayer.play()
+
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+            }
+        }
+        recordingPlayer.addListener(listener)
+
+        onDispose {
+            recordingPlayer.removeListener(listener)
+            recordingPlayer.stop()
+            recordingPlayer.release()
+        }
+    }
+
     var showControls by remember { mutableStateOf(true) }
     var currentPosMs by remember { mutableLongStateOf(0L) }
     var seekToastText by remember { mutableStateOf<String?>(null) }
 
-    val totalDurationMs = remember(recording) {
-        (recording.durationSeconds * 1000L).coerceAtLeast(1000L)
+    val totalDurationMs = remember(recording, recordingPlayer) {
+        val dur = recordingPlayer.duration
+        if (dur > 0L) dur
+        else (recording.durationSeconds * 1000L).coerceAtLeast(1000L)
     }
 
     // Continuously read player position
-    LaunchedEffect(player) {
+    LaunchedEffect(recordingPlayer) {
         while (true) {
-            currentPosMs = player?.currentPosition ?: 0L
+            currentPosMs = recordingPlayer.currentPosition.coerceAtLeast(0L)
             delay(250)
         }
     }
@@ -125,6 +163,11 @@ fun TiviMateRecordingPlayerScreen(
         }
     }
 
+    val handleExit = {
+        recordingPlayer.stop()
+        onClose()
+    }
+
     BackHandler(enabled = showControls) {
         showControls = false
         try {
@@ -133,7 +176,7 @@ fun TiviMateRecordingPlayerScreen(
     }
 
     BackHandler(enabled = !showControls) {
-        onClose()
+        handleExit()
     }
 
     LaunchedEffect(Unit) {
@@ -144,15 +187,24 @@ fun TiviMateRecordingPlayerScreen(
     }
 
     fun seekBy(deltaMs: Long) {
-        player?.let { p ->
-            val target = (p.currentPosition + deltaMs).coerceIn(0L, totalDurationMs)
-            p.seekTo(target)
-            currentPosMs = target
-            showControls = true
-            val curSec = target / 1000
-            val curFormatted = String.format("%02d:%02d", curSec / 60, curSec % 60)
-            seekToastText = if (deltaMs > 0) "⏩ +10s ($curFormatted)" else "⏪ -10s ($curFormatted)"
+        val target = (recordingPlayer.currentPosition + deltaMs).coerceIn(0L, totalDurationMs)
+        recordingPlayer.seekTo(target)
+        currentPosMs = target
+        showControls = true
+        controlsInteractionTimestamp = System.currentTimeMillis()
+        val curSec = target / 1000
+        val curFormatted = String.format("%02d:%02d", curSec / 60, curSec % 60)
+        seekToastText = if (deltaMs > 0) "⏩ +10s ($curFormatted)" else "⏪ -10s ($curFormatted)"
+    }
+
+    fun togglePlayPause() {
+        if (recordingPlayer.isPlaying) {
+            recordingPlayer.pause()
+        } else {
+            recordingPlayer.play()
         }
+        showControls = true
+        controlsInteractionTimestamp = System.currentTimeMillis()
     }
 
     Box(
@@ -176,7 +228,7 @@ fun TiviMateRecordingPlayerScreen(
                                 true
                             }
                             KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                                onPlayPause()
+                                togglePlayPause()
                                 true
                             }
                             KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
@@ -188,7 +240,7 @@ fun TiviMateRecordingPlayerScreen(
                                 true
                             }
                             KeyEvent.KEYCODE_BACK -> {
-                                onClose()
+                                handleExit()
                                 true
                             }
                             else -> false
@@ -200,23 +252,10 @@ fun TiviMateRecordingPlayerScreen(
             .focusable()
     ) {
         // 1. VIDEO SURFACE
-        if (player != null) {
-            TiviMateVideoPlayer(
-                player = player,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                TvLoadingSpinner(
-                    modifier = Modifier.size(40.dp),
-                    color = TvColors.Focus,
-                    strokeWidth = 3.dp
-                )
-            }
-        }
+        TiviMateVideoPlayer(
+            player = recordingPlayer,
+            modifier = Modifier.fillMaxSize()
+        )
 
         // 2. SEEK TOAST
         AnimatedVisibility(
@@ -341,7 +380,7 @@ fun TiviMateRecordingPlayerScreen(
                     RecordingControlButton(
                         icon = Icons.Rounded.Close,
                         label = "Close",
-                        onClick = onClose,
+                        onClick = handleExit,
                         focusRequester = topCloseFocusRequester,
                         onNavigateDown = { playPauseFocusRequester.requestFocus() },
                         onNavigateUp = { /* trap */ },
@@ -439,7 +478,7 @@ fun TiviMateRecordingPlayerScreen(
                                 label = if (isPlaying) "Pause" else "Play",
                                 onClick = {
                                     controlsInteractionTimestamp = System.currentTimeMillis()
-                                    onPlayPause()
+                                    togglePlayPause()
                                 },
                                 focusRequester = playPauseFocusRequester,
                                 isPrimary = true,
@@ -467,7 +506,7 @@ fun TiviMateRecordingPlayerScreen(
                             RecordingControlButton(
                                 icon = Icons.Rounded.Close,
                                 label = "Exit",
-                                onClick = onClose,
+                                onClick = handleExit,
                                 onNavigateRight = { /* trap */ },
                                 onNavigateUp = { topCloseFocusRequester.requestFocus() },
                                 onNavigateDown = {

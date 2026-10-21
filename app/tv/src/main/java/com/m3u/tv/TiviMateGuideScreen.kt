@@ -2254,6 +2254,13 @@ private fun TiviMateRecordingsDialog(
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.75f))
             .clickable { onDismiss() }
+            .onPreviewKeyEvent { event ->
+                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
+                    event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_BACK) {
+                    onDismiss()
+                    true
+                } else false
+            }
     ) {
         Column(
             modifier = Modifier
@@ -2327,6 +2334,10 @@ private fun TiviMateRecordingsDialog(
                                     KeyEvent.KEYCODE_DPAD_LEFT,
                                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                         true // Trap focus strictly inside dialog
+                                    }
+                                    KeyEvent.KEYCODE_BACK -> {
+                                        onDismiss()
+                                        true
                                     }
                                     else -> false
                                 }
@@ -2441,6 +2452,10 @@ private fun TiviMateRecordingsDialog(
                                                         bottomBtnFocusRequester.requestFocus()
                                                         true
                                                     } else false
+                                                }
+                                                KeyEvent.KEYCODE_BACK -> {
+                                                    onDismiss()
+                                                    true
                                                 }
                                                 else -> false
                                             }
@@ -2570,6 +2585,10 @@ private fun TiviMateRecordingsDialog(
                                                         true
                                                     } else false
                                                 }
+                                                KeyEvent.KEYCODE_BACK -> {
+                                                    onDismiss()
+                                                    true
+                                                }
                                                 else -> false
                                             }
                                         } else false
@@ -2626,6 +2645,10 @@ private fun TiviMateRecordingsDialog(
                                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                     true // Trap focus at bottom of dialog
                                 }
+                                KeyEvent.KEYCODE_BACK -> {
+                                    onDismiss()
+                                    true
+                                }
                                 else -> false
                             }
                         } else false
@@ -2676,6 +2699,13 @@ private fun TiviMateSettingsDialog(
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.75f))
             .clickable { onDismiss() }
+            .onPreviewKeyEvent { event ->
+                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
+                    event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_BACK) {
+                    onDismiss()
+                    true
+                } else false
+            }
     ) {
         Column(
             modifier = Modifier
@@ -2746,6 +2776,10 @@ private fun TiviMateSettingsDialog(
                                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                         true // Trap focus
                                     }
+                                    KeyEvent.KEYCODE_BACK -> {
+                                        onDismiss()
+                                        true
+                                    }
                                     else -> false
                                 }
                             } else false
@@ -2813,6 +2847,10 @@ private fun TiviMateSettingsDialog(
                                         KeyEvent.KEYCODE_ENTER -> {
                                             true
                                         }
+                                        KeyEvent.KEYCODE_BACK -> {
+                                            onDismiss()
+                                            true
+                                        }
                                         else -> false
                                     }
                                 } else false
@@ -2870,6 +2908,10 @@ private fun TiviMateSettingsDialog(
                                 KeyEvent.KEYCODE_DPAD_LEFT,
                                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                     true // Trap focus at bottom
+                                }
+                                KeyEvent.KEYCODE_BACK -> {
+                                    onDismiss()
+                                    true
                                 }
                                 else -> false
                             }

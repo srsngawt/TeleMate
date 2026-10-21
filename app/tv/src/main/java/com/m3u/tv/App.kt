@@ -64,8 +64,12 @@ fun App(
     var currentCategoryName by remember { mutableStateOf("All channels") }
     var showExitDialog by remember { mutableStateOf(false) }
     val closePlayer = {
+        val wasRecording = activeRecording != null
         activeRecording = null
         surface = TvSurface.Browse
+        if (wasRecording && currentChannel != null) {
+            viewModel.pauseOrContinue(true)
+        }
     }
 
     LaunchedEffect(state.channels) {
@@ -145,22 +149,8 @@ fun App(
                     surface = TvSurface.Player
                 },
                 onPlayRecording = { rec ->
+                    viewModel.pauseOrContinue(false)
                     activeRecording = rec
-                    val matchingChannel = state.channels.find { it.id == rec.channelId || it.url == rec.streamUrl }
-                    if (matchingChannel != null) {
-                        viewModel.play(matchingChannel)
-                    } else {
-                        viewModel.play(
-                            com.m3u.data.database.model.Channel(
-                                id = rec.channelId,
-                                title = rec.channelName,
-                                url = rec.streamUrl,
-                                playlistUrl = "",
-                                category = "Recordings",
-                                cover = rec.coverUrl
-                            )
-                        )
-                    }
                     surface = TvSurface.Player
                 }
             )
@@ -173,10 +163,7 @@ fun App(
                 val recording = activeRecording
                 if (recording != null) {
                     TiviMateRecordingPlayerScreen(
-                        player = player,
                         recording = recording,
-                        isPlaying = isPlaying,
-                        onPlayPause = { viewModel.pauseOrContinue(!isPlaying) },
                         onClose = closePlayer
                     )
                 } else {

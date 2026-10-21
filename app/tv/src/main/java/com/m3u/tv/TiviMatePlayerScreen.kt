@@ -50,6 +50,7 @@ import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -130,7 +131,9 @@ fun TiviMatePlayerScreen(
     val actionButtonsFocusRequester = remember { FocusRequester() }
     val sliderFocusRequester = remember { FocusRequester() }
     val drawerFocusRequester = remember { FocusRequester() }
+    val drawerCloseFocusRequester = remember { FocusRequester() }
     val drawerListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    var currentRecordingId by remember { mutableStateOf<String?>(null) }
 
     // Timeshift / Live seeking logic
     val onSeekBy: (Long) -> Unit = { deltaSec ->
@@ -260,6 +263,26 @@ fun TiviMatePlayerScreen(
         }
     }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            if (isRecording) {
+                val filePath = StreamRecorder.stop()
+                val recId = currentRecordingId ?: java.util.UUID.randomUUID().toString()
+                val rec = TvRecording(
+                    id = recId,
+                    channelId = channel?.id ?: 0,
+                    channelName = channel?.title ?: "Live Channel",
+                    showTitle = "${currentUnified?.baseName ?: channel?.title ?: "Live Channel"} Broadcast",
+                    coverUrl = channel?.cover,
+                    streamUrl = filePath ?: (channel?.url ?: ""),
+                    durationSeconds = maxOf(1, recordingSeconds),
+                    timestamp = System.currentTimeMillis()
+                )
+                RecordingsManager.saveRecording(context, rec)
+            }
+        }
+    }
+
     // Active variant info
     val activeVariant = remember(channel, currentUnified) {
         currentUnified?.variants?.find { it.channel.id == channel?.id }
@@ -386,16 +409,25 @@ fun TiviMatePlayerScreen(
                                 else -> false
                             }
                         } else {
-                            if (keyCode == KeyEvent.KEYCODE_BACK) {
-                                when {
-                                    showQuickChannelDrawer -> { showQuickChannelDrawer = false; true }
-                                    showInfobar -> {
-                                        showInfobar = false
+                            if (showQuickChannelDrawer) {
+                                when (keyCode) {
+                                    KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                        try { drawerFocusRequester.requestFocus() } catch (_: Exception) {}
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_BACK -> {
+                                        showQuickChannelDrawer = false
                                         try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
                                         true
                                     }
-                                    else -> false
+                                    else -> true // Trap keys while drawer is open
                                 }
+                            } else if (keyCode == KeyEvent.KEYCODE_BACK) {
+                                if (showInfobar) {
+                                    showInfobar = false
+                                    try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
+                                    true
+                                } else false
                             } else false
                         }
                     } else false
@@ -717,22 +749,31 @@ fun TiviMatePlayerScreen(
                         onNavigateDown = closeControlsAndFocusPlayer,
                         onClick = {
                             if (!isRecording) {
+                                val recId = java.util.UUID.randomUUID().toString()
+                                currentRecordingId = recId
                                 isRecording = true
                                 recordingSeconds = 0
+                                val channelUrl = channel?.url ?: ""
+                                if (channelUrl.isNotBlank()) {
+                                    StreamRecorder.start(context, recId, channelUrl)
+                                }
                                 zappingToastText = "🔴 Recording started: ${channel?.title ?: "Stream"}"
                             } else {
                                 isRecording = false
+                                val filePath = StreamRecorder.stop()
+                                val recId = currentRecordingId ?: java.util.UUID.randomUUID().toString()
                                 val rec = TvRecording(
-                                    id = java.util.UUID.randomUUID().toString(),
+                                    id = recId,
                                     channelId = channel?.id ?: 0,
                                     channelName = channel?.title ?: "Live Channel",
                                     showTitle = "${currentUnified?.baseName ?: channel?.title ?: "Live Channel"} Broadcast",
                                     coverUrl = channel?.cover,
-                                    streamUrl = channel?.url ?: "",
+                                    streamUrl = filePath ?: (channel?.url ?: ""),
                                     durationSeconds = maxOf(1, recordingSeconds),
                                     timestamp = System.currentTimeMillis()
                                 )
                                 RecordingsManager.saveRecording(context, rec)
+                                currentRecordingId = null
                                 zappingToastText = "⏹️ Recording saved (${rec.formattedDuration})"
                             }
                         }
@@ -792,13 +833,54 @@ fun TiviMatePlayerScreen(
                         letterSpacing = 0.8.sp
                     )
 
+                    var isDrawerCloseFocused by remember { mutableStateOf(false) }
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .size(28.dp)
                             .clip(CircleShape)
-                            .background(TvColors.SurfaceRaised)
-                            .clickable { showQuickChannelDrawer = false }
+                            .background(if (isDrawerCloseFocused) TvColors.Focus else TvColors.SurfaceRaised)
+                            .border(
+                                BorderStroke(
+                                    if (isDrawerCloseFocused) 1.5.dp else 1.dp,
+                                    if (isDrawerCloseFocused) TvColors.FocusGlow else TvColors.BorderSubtle
+                                ),
+                                CircleShape
+                            )
+                            .focusRequester(drawerCloseFocusRequester)
+                            .onFocusChanged { isDrawerCloseFocused = it.isFocused }
+                            .clickable {
+                                showQuickChannelDrawer = false
+                                try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
+                            }
+                            .onPreviewKeyEvent { event ->
+                                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                    when (event.nativeKeyEvent.keyCode) {
+                                        KeyEvent.KEYCODE_DPAD_CENTER,
+                                        KeyEvent.KEYCODE_ENTER -> {
+                                            showQuickChannelDrawer = false
+                                            try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
+                                            true
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                            try { drawerFocusRequester.requestFocus() } catch (_: Exception) {}
+                                            true
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_RIGHT,
+                                        KeyEvent.KEYCODE_BACK -> {
+                                            showQuickChannelDrawer = false
+                                            try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
+                                            true
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_UP,
+                                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                            true // Trap focus
+                                        }
+                                        else -> false
+                                    }
+                                } else false
+                            }
+                            .focusable()
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Close,
@@ -842,6 +924,7 @@ fun TiviMatePlayerScreen(
                                 .clickable {
                                     onSwitchChannel(ch)
                                     showQuickChannelDrawer = false
+                                    try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
                                 }
                                 .onPreviewKeyEvent { keyEvent ->
                                     if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
@@ -849,10 +932,31 @@ fun TiviMatePlayerScreen(
                                             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
                                                 onSwitchChannel(ch)
                                                 showQuickChannelDrawer = false
+                                                try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
                                                 true
                                             }
-                                            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_BACK -> {
+                                            KeyEvent.KEYCODE_DPAD_UP -> {
+                                                if (index == 0) {
+                                                    drawerCloseFocusRequester.requestFocus()
+                                                    true
+                                                } else false
+                                            }
+                                            KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                                if (index == activeZapList.size - 1) {
+                                                    true // Trap focus at bottom
+                                                } else false
+                                            }
+                                            KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                                 showQuickChannelDrawer = false
+                                                try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
+                                                true
+                                            }
+                                            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                                true // Trap focus inside drawer
+                                            }
+                                            KeyEvent.KEYCODE_BACK -> {
+                                                showQuickChannelDrawer = false
+                                                try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
                                                 true
                                             }
                                             else -> false
