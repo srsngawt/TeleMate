@@ -2233,6 +2233,21 @@ private fun TiviMateRecordingsDialog(
     val context = LocalContext.current
     var recordings by remember { mutableStateOf(RecordingsManager.getRecordings(context)) }
 
+    val closeFocusRequester = remember { FocusRequester() }
+    val firstItemFocusRequester = remember { FocusRequester() }
+    val bottomBtnFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        delay(100)
+        try {
+            if (recordings.isNotEmpty()) {
+                firstItemFocusRequester.requestFocus()
+            } else {
+                bottomBtnFocusRequester.requestFocus()
+            }
+        } catch (_: Exception) {}
+    }
+
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -2289,15 +2304,32 @@ private fun TiviMateRecordingsDialog(
                             ),
                             CircleShape
                         )
+                        .focusRequester(closeFocusRequester)
                         .onFocusChanged { isCloseFocused = it.isFocused }
                         .clickable { onDismiss() }
                         .onPreviewKeyEvent { event ->
                             if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                                if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                                    event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER) {
-                                    onDismiss()
-                                    true
-                                } else false
+                                when (event.nativeKeyEvent.keyCode) {
+                                    KeyEvent.KEYCODE_DPAD_CENTER,
+                                    KeyEvent.KEYCODE_ENTER -> {
+                                        onDismiss()
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                        if (recordings.isNotEmpty()) {
+                                            firstItemFocusRequester.requestFocus()
+                                        } else {
+                                            bottomBtnFocusRequester.requestFocus()
+                                        }
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_UP,
+                                    KeyEvent.KEYCODE_DPAD_LEFT,
+                                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                        true // Trap focus strictly inside dialog
+                                    }
+                                    else -> false
+                                }
                             } else false
                         }
                         .focusable()
@@ -2358,13 +2390,19 @@ private fun TiviMateRecordingsDialog(
                         .heightIn(max = 340.dp)
                         .padding(vertical = 8.dp)
                 ) {
-                    items(recordings, key = { it.id }) { rec ->
+                    itemsIndexed(recordings, key = { _, rec -> rec.id }) { index, rec ->
                         var isItemFocused by remember { mutableStateOf(false) }
+                        val isFirst = index == 0
+                        val isLast = index == recordings.size - 1
+
+                        val itemModifier = if (isFirst) {
+                            Modifier.focusRequester(firstItemFocusRequester)
+                        } else Modifier
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier
+                            modifier = itemModifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(if (isItemFocused) TvColors.Focus else TvColors.SurfaceRaised)
@@ -2375,12 +2413,31 @@ private fun TiviMateRecordingsDialog(
                                 .onFocusChanged { isItemFocused = it.isFocused }
                                 .clickable { onPlayRecording(rec) }
                                 .onPreviewKeyEvent { event ->
-                                    if ((event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN || event.nativeKeyEvent.action == KeyEvent.ACTION_UP) &&
-                                        (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                                         event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER)
-                                    ) {
-                                        onPlayRecording(rec)
-                                        true
+                                    if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                        when (event.nativeKeyEvent.keyCode) {
+                                            KeyEvent.KEYCODE_DPAD_CENTER,
+                                            KeyEvent.KEYCODE_ENTER -> {
+                                                onPlayRecording(rec)
+                                                true
+                                            }
+                                            KeyEvent.KEYCODE_DPAD_UP -> {
+                                                if (isFirst) {
+                                                    closeFocusRequester.requestFocus()
+                                                    true
+                                                } else false
+                                            }
+                                            KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                                if (isLast) {
+                                                    bottomBtnFocusRequester.requestFocus()
+                                                    true
+                                                } else false
+                                            }
+                                            KeyEvent.KEYCODE_DPAD_LEFT,
+                                            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                                true // Trap focus horizontally
+                                            }
+                                            else -> false
+                                        }
                                     } else false
                                 }
                                 .focusable()
@@ -2496,11 +2553,6 @@ private fun TiviMateRecordingsDialog(
             Spacer(modifier = Modifier.height(12.dp))
 
             var isBtnFocused by remember { mutableStateOf(false) }
-            val btnFocusRequester = remember { FocusRequester() }
-            LaunchedEffect(Unit) {
-                delay(100)
-                try { btnFocusRequester.requestFocus() } catch (_: Exception) {}
-            }
 
             Box(
                 contentAlignment = Alignment.Center,
@@ -2512,16 +2564,32 @@ private fun TiviMateRecordingsDialog(
                         BorderStroke(1.dp, if (isBtnFocused) TvColors.FocusGlow else TvColors.BorderSubtle),
                         RoundedCornerShape(8.dp)
                     )
-                    .focusRequester(btnFocusRequester)
+                    .focusRequester(bottomBtnFocusRequester)
                     .onFocusChanged { isBtnFocused = it.isFocused }
                     .clickable { onDismiss() }
                     .onPreviewKeyEvent { event ->
-                        if ((event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN || event.nativeKeyEvent.action == KeyEvent.ACTION_UP) &&
-                            (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                             event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER)
-                        ) {
-                            onDismiss()
-                            true
+                        if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                            when (event.nativeKeyEvent.keyCode) {
+                                KeyEvent.KEYCODE_DPAD_CENTER,
+                                KeyEvent.KEYCODE_ENTER -> {
+                                    onDismiss()
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_UP -> {
+                                    if (recordings.isNotEmpty()) {
+                                        firstItemFocusRequester.requestFocus()
+                                    } else {
+                                        closeFocusRequester.requestFocus()
+                                    }
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_DOWN,
+                                KeyEvent.KEYCODE_DPAD_LEFT,
+                                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                    true // Trap focus at bottom of dialog
+                                }
+                                else -> false
+                            }
                         } else false
                     }
                     .focusable()
@@ -2544,6 +2612,26 @@ private fun TiviMateSettingsDialog(
     onDismiss: () -> Unit
 ) {
     BackHandler { onDismiss() }
+    val closeFocusRequester = remember { FocusRequester() }
+    val firstItemFocusRequester = remember { FocusRequester() }
+    val bottomBtnFocusRequester = remember { FocusRequester() }
+
+    val settingsItems = remember {
+        listOf(
+            "Playlists & EPG" to "Manage subscriptions & XMLTV URLs",
+            "Playback Engine" to "ExoPlayer Media3 (Hardware Accelerated)",
+            "Audio & Video Quality" to "Auto adaptive HLS with manual overrides",
+            "About TeleMate" to "Version 1.0 (Android TV Pro Edition)"
+        )
+    }
+
+    LaunchedEffect(Unit) {
+        delay(100)
+        try {
+            firstItemFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+    }
+
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -2600,15 +2688,28 @@ private fun TiviMateSettingsDialog(
                             ),
                             CircleShape
                         )
+                        .focusRequester(closeFocusRequester)
                         .onFocusChanged { isCloseFocused = it.isFocused }
                         .clickable { onDismiss() }
                         .onPreviewKeyEvent { event ->
                             if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                                if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                                    event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER) {
-                                    onDismiss()
-                                    true
-                                } else false
+                                when (event.nativeKeyEvent.keyCode) {
+                                    KeyEvent.KEYCODE_DPAD_CENTER,
+                                    KeyEvent.KEYCODE_ENTER -> {
+                                        onDismiss()
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                        firstItemFocusRequester.requestFocus()
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_UP,
+                                    KeyEvent.KEYCODE_DPAD_LEFT,
+                                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                        true // Trap focus
+                                    }
+                                    else -> false
+                                }
                             } else false
                         }
                         .focusable()
@@ -2628,17 +2729,57 @@ private fun TiviMateSettingsDialog(
                     .fillMaxWidth()
                     .padding(vertical = 8.dp)
             ) {
-                listOf(
-                    "Playlists & EPG" to "Manage subscriptions & XMLTV URLs",
-                    "Playback Engine" to "ExoPlayer Media3 (Hardware Accelerated)",
-                    "Audio & Video Quality" to "Auto adaptive HLS with manual overrides",
-                    "About TeleMate" to "Version 1.0 (Android TV Pro Edition)"
-                ).forEach { (title, subtitle) ->
+                settingsItems.forEachIndexed { index, (title, subtitle) ->
+                    var isItemFocused by remember { mutableStateOf(false) }
+                    val isFirst = index == 0
+                    val isLast = index == settingsItems.size - 1
+
+                    val itemModifier = if (isFirst) {
+                        Modifier.focusRequester(firstItemFocusRequester)
+                    } else Modifier
+
                     Column(
-                        modifier = Modifier
+                        modifier = itemModifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .background(TvColors.SurfaceRaised)
+                            .background(if (isItemFocused) TvColors.Focus else TvColors.SurfaceRaised)
+                            .border(
+                                BorderStroke(
+                                    1.dp,
+                                    if (isItemFocused) TvColors.FocusGlow else TvColors.BorderSubtle
+                                ),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .onFocusChanged { isItemFocused = it.isFocused }
+                            .clickable { }
+                            .onPreviewKeyEvent { event ->
+                                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                    when (event.nativeKeyEvent.keyCode) {
+                                        KeyEvent.KEYCODE_DPAD_UP -> {
+                                            if (isFirst) {
+                                                closeFocusRequester.requestFocus()
+                                                true
+                                            } else false
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                            if (isLast) {
+                                                bottomBtnFocusRequester.requestFocus()
+                                                true
+                                            } else false
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_LEFT,
+                                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                            true // Trap focus horizontally
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_CENTER,
+                                        KeyEvent.KEYCODE_ENTER -> {
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                } else false
+                            }
+                            .focusable()
                             .padding(horizontal = 14.dp, vertical = 8.dp)
                     ) {
                         Text(
@@ -2650,7 +2791,7 @@ private fun TiviMateSettingsDialog(
                         )
                         Text(
                             text = subtitle,
-                            color = TvColors.TextSecondary,
+                            color = if (isItemFocused) Color.White.copy(alpha = 0.9f) else TvColors.TextSecondary,
                             fontSize = 11.sp,
                             fontFamily = TvFonts.Body
                         )
@@ -2661,11 +2802,6 @@ private fun TiviMateSettingsDialog(
             Spacer(modifier = Modifier.height(10.dp))
 
             var isBtnFocused by remember { mutableStateOf(false) }
-            val btnFocusRequester = remember { FocusRequester() }
-            LaunchedEffect(Unit) {
-                delay(100)
-                try { btnFocusRequester.requestFocus() } catch (_: Exception) {}
-            }
 
             Box(
                 contentAlignment = Alignment.Center,
@@ -2677,9 +2813,30 @@ private fun TiviMateSettingsDialog(
                         BorderStroke(1.dp, if (isBtnFocused) TvColors.FocusGlow else TvColors.BorderSubtle),
                         RoundedCornerShape(8.dp)
                     )
-                    .focusRequester(btnFocusRequester)
+                    .focusRequester(bottomBtnFocusRequester)
                     .onFocusChanged { isBtnFocused = it.isFocused }
                     .clickable { onDismiss() }
+                    .onPreviewKeyEvent { event ->
+                        if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                            when (event.nativeKeyEvent.keyCode) {
+                                KeyEvent.KEYCODE_DPAD_CENTER,
+                                KeyEvent.KEYCODE_ENTER -> {
+                                    onDismiss()
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_UP -> {
+                                    firstItemFocusRequester.requestFocus()
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_DOWN,
+                                KeyEvent.KEYCODE_DPAD_LEFT,
+                                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                    true // Trap focus at bottom
+                                }
+                                else -> false
+                            }
+                        } else false
+                    }
                     .focusable()
                     .padding(vertical = 11.dp)
             ) {

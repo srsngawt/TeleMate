@@ -123,7 +123,7 @@ fun App(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .focusProperties { canFocus = !showExitDialog }
+                .focusProperties { canFocus = surface == TvSurface.Browse && !showExitDialog }
         ) {
             TiviMateGuideScreen(
                 channels = state.channels,

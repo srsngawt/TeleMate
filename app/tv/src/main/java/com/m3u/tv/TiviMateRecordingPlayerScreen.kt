@@ -92,18 +92,23 @@ fun TiviMateRecordingPlayerScreen(
         }
     }
 
-    // Auto-hide controls after 4.5 seconds of inactivity, and manage remote focus
+    // Auto-hide controls after 5 seconds of inactivity, and manage remote focus
     val playPauseFocusRequester = remember { FocusRequester() }
     val rootFocusRequester = remember { FocusRequester() }
+    val topCloseFocusRequester = remember { FocusRequester() }
+    var controlsInteractionTimestamp by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
-    LaunchedEffect(showControls) {
+    LaunchedEffect(showControls, controlsInteractionTimestamp) {
         if (showControls) {
             delay(100)
             try {
                 playPauseFocusRequester.requestFocus()
             } catch (_: Exception) {}
-            delay(4500)
+            delay(5000)
             showControls = false
+            try {
+                rootFocusRequester.requestFocus()
+            } catch (_: Exception) {}
         } else {
             delay(50)
             try {
@@ -161,31 +166,40 @@ fun TiviMateRecordingPlayerScreen(
                         KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
                             onPlayPause()
                             showControls = true
+                            controlsInteractionTimestamp = System.currentTimeMillis()
+                            try { playPauseFocusRequester.requestFocus() } catch (_: Exception) {}
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_LEFT -> {
                             seekBy(-10000L)
+                            controlsInteractionTimestamp = System.currentTimeMillis()
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_RIGHT -> {
                             seekBy(10000L)
+                            controlsInteractionTimestamp = System.currentTimeMillis()
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
-                            showControls = !showControls
+                            showControls = true
+                            controlsInteractionTimestamp = System.currentTimeMillis()
+                            try { playPauseFocusRequester.requestFocus() } catch (_: Exception) {}
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
                             onPlayPause()
                             showControls = true
+                            controlsInteractionTimestamp = System.currentTimeMillis()
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
                             seekBy(10000L)
+                            controlsInteractionTimestamp = System.currentTimeMillis()
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_REWIND -> {
                             seekBy(-10000L)
+                            controlsInteractionTimestamp = System.currentTimeMillis()
                             true
                         }
                         KeyEvent.KEYCODE_BACK -> {
@@ -341,7 +355,12 @@ fun TiviMateRecordingPlayerScreen(
                     RecordingControlButton(
                         icon = Icons.Rounded.Close,
                         label = "Close",
-                        onClick = onClose
+                        onClick = onClose,
+                        focusRequester = topCloseFocusRequester,
+                        onNavigateDown = { playPauseFocusRequester.requestFocus() },
+                        onNavigateUp = { /* trap */ },
+                        onNavigateLeft = { /* trap */ },
+                        onNavigateRight = { /* trap */ }
                     )
                 }
 
@@ -417,27 +436,58 @@ fun TiviMateRecordingPlayerScreen(
                             RecordingControlButton(
                                 icon = Icons.Rounded.Replay10,
                                 label = "-10s",
-                                onClick = { seekBy(-10000L) }
+                                onClick = {
+                                    controlsInteractionTimestamp = System.currentTimeMillis()
+                                    seekBy(-10000L)
+                                },
+                                onNavigateLeft = { /* trap */ },
+                                onNavigateUp = { topCloseFocusRequester.requestFocus() },
+                                onNavigateDown = {
+                                    showControls = false
+                                    rootFocusRequester.requestFocus()
+                                }
                             )
 
                             RecordingControlButton(
                                 icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                 label = if (isPlaying) "Pause" else "Play",
-                                onClick = onPlayPause,
+                                onClick = {
+                                    controlsInteractionTimestamp = System.currentTimeMillis()
+                                    onPlayPause()
+                                },
                                 focusRequester = playPauseFocusRequester,
-                                isPrimary = true
+                                isPrimary = true,
+                                onNavigateUp = { topCloseFocusRequester.requestFocus() },
+                                onNavigateDown = {
+                                    showControls = false
+                                    rootFocusRequester.requestFocus()
+                                }
                             )
 
                             RecordingControlButton(
                                 icon = Icons.Rounded.Forward10,
                                 label = "+10s",
-                                onClick = { seekBy(10000L) }
+                                onClick = {
+                                    controlsInteractionTimestamp = System.currentTimeMillis()
+                                    seekBy(10000L)
+                                },
+                                onNavigateUp = { topCloseFocusRequester.requestFocus() },
+                                onNavigateDown = {
+                                    showControls = false
+                                    rootFocusRequester.requestFocus()
+                                }
                             )
 
                             RecordingControlButton(
                                 icon = Icons.Rounded.Close,
                                 label = "Exit",
-                                onClick = onClose
+                                onClick = onClose,
+                                onNavigateRight = { /* trap */ },
+                                onNavigateUp = { topCloseFocusRequester.requestFocus() },
+                                onNavigateDown = {
+                                    showControls = false
+                                    rootFocusRequester.requestFocus()
+                                }
                             )
                         }
                     }
@@ -453,7 +503,11 @@ private fun RecordingControlButton(
     label: String,
     onClick: () -> Unit,
     focusRequester: FocusRequester? = null,
-    isPrimary: Boolean = false
+    isPrimary: Boolean = false,
+    onNavigateUp: (() -> Unit)? = null,
+    onNavigateDown: (() -> Unit)? = null,
+    onNavigateLeft: (() -> Unit)? = null,
+    onNavigateRight: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
 
@@ -480,12 +534,39 @@ private fun RecordingControlButton(
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onClick() }
             .onPreviewKeyEvent { event ->
-                if ((event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN || event.nativeKeyEvent.action == KeyEvent.ACTION_UP) &&
-                    (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                     event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER)
-                ) {
-                    onClick()
-                    true
+                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                    when (event.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_CENTER,
+                        KeyEvent.KEYCODE_ENTER -> {
+                            onClick()
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            if (onNavigateUp != null) {
+                                onNavigateUp()
+                                true
+                            } else false
+                        }
+                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            if (onNavigateDown != null) {
+                                onNavigateDown()
+                                true
+                            } else false
+                        }
+                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            if (onNavigateLeft != null) {
+                                onNavigateLeft()
+                                true
+                            } else false
+                        }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            if (onNavigateRight != null) {
+                                onNavigateRight()
+                                true
+                            } else false
+                        }
+                        else -> false
+                    }
                 } else false
             }
             .focusable()
