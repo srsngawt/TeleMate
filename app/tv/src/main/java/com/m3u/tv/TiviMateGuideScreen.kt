@@ -2516,8 +2516,22 @@ private fun TiviMateRecordingsDialog(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
+                                        val recFile = remember(rec) {
+                                            val f1 = java.io.File(rec.streamUrl)
+                                            if (f1.exists() && f1.length() > 0L) f1
+                                            else {
+                                                val f2 = java.io.File(context.filesDir, "recordings/rec_${rec.id}.ts")
+                                                if (f2.exists() && f2.length() > 0L) f2 else null
+                                            }
+                                        }
+                                        val sizeStr = remember(recFile) {
+                                            if (recFile != null) {
+                                                val mb = recFile.length() / (1024.0 * 1024.0)
+                                                String.format("%.1f MB", mb)
+                                            } else "No File"
+                                        }
                                         Text(
-                                            text = "🔴 ${rec.formattedDuration}  •  ${rec.formattedDate}",
+                                            text = "🔴 ${rec.formattedDuration}  •  ${rec.formattedDate}  •  $sizeStr",
                                             color = if (isPlayFocused) Color.White.copy(alpha = 0.75f) else TvColors.TextMuted,
                                             fontSize = 11.sp,
                                             fontFamily = TvFonts.Body

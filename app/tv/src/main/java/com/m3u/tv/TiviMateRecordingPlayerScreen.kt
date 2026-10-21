@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -56,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.tv.material3.Icon
@@ -80,27 +82,52 @@ fun TiviMateRecordingPlayerScreen(
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
+    val localFile = remember(recording.streamUrl, recording.id) {
+        val f1 = File(recording.streamUrl)
+        if (f1.exists() && f1.length() > 0L) f1
+        else {
+            val f2 = File(context.filesDir, "recordings/rec_${recording.id}.ts")
+            if (f2.exists() && f2.length() > 0L) f2 else null
+        }
+    }
+
+    var playbackError by remember {
+        mutableStateOf<String?>(
+            if (localFile == null) "Recorded video file is not available on device storage." else null
+        )
+    }
+    val errorExitFocusRequester = remember { FocusRequester() }
+
     val recordingPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
             playWhenReady = true
         }
     }
     var isPlaying by remember { mutableStateOf(true) }
+    var playerDurationMs by remember { mutableLongStateOf(0L) }
 
-    DisposableEffect(recordingPlayer, recording.streamUrl) {
-        val file = File(recording.streamUrl)
-        val mediaItem = if (file.exists()) {
-            MediaItem.fromUri(Uri.fromFile(file))
-        } else {
-            MediaItem.fromUri(Uri.parse(recording.streamUrl))
+    DisposableEffect(recordingPlayer, localFile) {
+        if (localFile != null) {
+            val mediaItem = MediaItem.fromUri(Uri.fromFile(localFile))
+            recordingPlayer.setMediaItem(mediaItem)
+            recordingPlayer.prepare()
+            recordingPlayer.play()
         }
-        recordingPlayer.setMediaItem(mediaItem)
-        recordingPlayer.prepare()
-        recordingPlayer.play()
 
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
+            }
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_READY) {
+                    val d = recordingPlayer.duration
+                    if (d > 0L) playerDurationMs = d
+                } else if (state == Player.STATE_ENDED) {
+                    isPlaying = false
+                }
+            }
+            override fun onPlayerError(error: PlaybackException) {
+                playbackError = error.localizedMessage ?: "Failed to play recorded file."
             }
         }
         recordingPlayer.addListener(listener)
@@ -112,13 +139,97 @@ fun TiviMateRecordingPlayerScreen(
         }
     }
 
+    val handleExit = {
+        try { recordingPlayer.stop() } catch (_: Exception) {}
+        onClose()
+    }
+
+    LaunchedEffect(playbackError) {
+        if (playbackError != null) {
+            delay(100)
+            try {
+                errorExitFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
+
+    if (playbackError != null) {
+        BackHandler { handleExit() }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .onPreviewKeyEvent { event ->
+                    if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
+                        event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_BACK) {
+                        handleExit()
+                        true
+                    } else false
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier
+                    .widthIn(min = 360.dp, max = 500.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(TvColors.Surface)
+                    .border(BorderStroke(1.dp, TvColors.BorderSubtle), RoundedCornerShape(16.dp))
+                    .padding(32.dp)
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(TvColors.Danger.copy(alpha = 0.2f))
+                        .border(BorderStroke(1.dp, TvColors.Danger), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = null,
+                        tint = TvColors.Danger,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+
+                Text(
+                    text = "Recording Not Available",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = TvFonts.Body
+                )
+
+                Text(
+                    text = playbackError ?: "The recorded file for this broadcast was not found on device storage.",
+                    color = TvColors.TextSecondary,
+                    fontSize = 13.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    fontFamily = TvFonts.Body
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                RecordingControlButton(
+                    icon = Icons.Rounded.Close,
+                    label = "Exit to Recordings",
+                    onClick = handleExit,
+                    focusRequester = errorExitFocusRequester,
+                    isPrimary = true
+                )
+            }
+        }
+        return
+    }
+
     var showControls by remember { mutableStateOf(true) }
     var currentPosMs by remember { mutableLongStateOf(0L) }
     var seekToastText by remember { mutableStateOf<String?>(null) }
 
-    val totalDurationMs = remember(recording, recordingPlayer) {
-        val dur = recordingPlayer.duration
-        if (dur > 0L) dur
+    val totalDurationMs = remember(recording, playerDurationMs) {
+        if (playerDurationMs > 0L) playerDurationMs
         else (recording.durationSeconds * 1000L).coerceAtLeast(1000L)
     }
 
@@ -163,10 +274,7 @@ fun TiviMateRecordingPlayerScreen(
         }
     }
 
-    val handleExit = {
-        recordingPlayer.stop()
-        onClose()
-    }
+
 
     BackHandler(enabled = showControls) {
         showControls = false

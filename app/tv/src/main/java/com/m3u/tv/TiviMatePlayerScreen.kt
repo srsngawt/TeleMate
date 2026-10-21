@@ -268,13 +268,15 @@ fun TiviMatePlayerScreen(
             if (isRecording) {
                 val filePath = StreamRecorder.stop()
                 val recId = currentRecordingId ?: java.util.UUID.randomUUID().toString()
+                val localFile = java.io.File(context.filesDir, "recordings/rec_${recId}.ts")
+                val savedPath = filePath ?: localFile.absolutePath
                 val rec = TvRecording(
                     id = recId,
                     channelId = channel?.id ?: 0,
                     channelName = channel?.title ?: "Live Channel",
                     showTitle = "${currentUnified?.baseName ?: channel?.title ?: "Live Channel"} Broadcast",
                     coverUrl = channel?.cover,
-                    streamUrl = filePath ?: (channel?.url ?: ""),
+                    streamUrl = savedPath,
                     durationSeconds = maxOf(1, recordingSeconds),
                     timestamp = System.currentTimeMillis()
                 )
@@ -762,13 +764,15 @@ fun TiviMatePlayerScreen(
                                 isRecording = false
                                 val filePath = StreamRecorder.stop()
                                 val recId = currentRecordingId ?: java.util.UUID.randomUUID().toString()
+                                val localFile = java.io.File(context.filesDir, "recordings/rec_${recId}.ts")
+                                val savedPath = filePath ?: localFile.absolutePath
                                 val rec = TvRecording(
                                     id = recId,
                                     channelId = channel?.id ?: 0,
                                     channelName = channel?.title ?: "Live Channel",
                                     showTitle = "${currentUnified?.baseName ?: channel?.title ?: "Live Channel"} Broadcast",
                                     coverUrl = channel?.cover,
-                                    streamUrl = filePath ?: (channel?.url ?: ""),
+                                    streamUrl = savedPath,
                                     durationSeconds = maxOf(1, recordingSeconds),
                                     timestamp = System.currentTimeMillis()
                                 )

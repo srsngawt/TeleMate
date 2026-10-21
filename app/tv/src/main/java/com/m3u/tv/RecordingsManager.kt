@@ -8,13 +8,20 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URI
 import java.net.URL
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 data class TvRecording(
     val id: String,
@@ -28,9 +35,9 @@ data class TvRecording(
 ) {
     val formattedDuration: String
         get() {
-            val m = durationSeconds / 60
-            val s = durationSeconds % 60
-            return String.format("%02d:%02d", m, s)
+            val mins = durationSeconds / 60
+            val secs = durationSeconds % 60
+            return String.format("%02d:%02d", mins, secs)
         }
 
     val formattedDate: String
@@ -46,23 +53,41 @@ object StreamRecorder {
     @Volatile
     private var currentFile: File? = null
 
+    private val trustAllCert = object : X509TrustManager {
+        override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+        override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+        override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+    }
+
+    private val trustAllSslContext = SSLContext.getInstance("TLS").apply {
+        init(null, arrayOf<TrustManager>(trustAllCert), SecureRandom())
+    }
+
+    private val client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .connectTimeout(12, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .sslSocketFactory(trustAllSslContext.socketFactory, trustAllCert)
+            .hostnameVerifier { _, _ -> true }
+            .build()
+    }
+
     fun start(context: Context, recId: String, streamUrl: String): String {
         stop()
         val dir = File(context.filesDir, "recordings").apply { mkdirs() }
         val file = File(dir, "rec_${recId}.ts")
+        try {
+            if (!file.exists()) file.createNewFile()
+        } catch (_: Exception) {}
         currentFile = file
 
         recordingJob = CoroutineScope(Dispatchers.IO).launch {
             try {
-                if (streamUrl.contains(".m3u8", ignoreCase = true)) {
-                    recordHls(streamUrl, file)
-                } else {
-                    recordDirect(streamUrl, file)
-                }
-            } catch (_: Exception) {
-                try {
-                    recordDirect(streamUrl, file)
-                } catch (_: Exception) {}
+                recordStream(streamUrl, file)
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
         return file.absolutePath
@@ -78,99 +103,198 @@ object StreamRecorder {
         return path
     }
 
-    private suspend fun recordHls(streamUrl: String, outputFile: File) {
-        var mediaUrl = streamUrl
-        try {
-            val conn = (URL(streamUrl).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 6000
-                readTimeout = 6000
-                setRequestProperty("User-Agent", "TeleMate/1.0 (Android TV)")
-                instanceFollowRedirects = true
+    private fun resolveUrl(baseUrl: String, pathOrUrl: String): String {
+        val resolved = try {
+            URL(URL(baseUrl), pathOrUrl).toString()
+        } catch (_: Exception) {
+            if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) {
+                pathOrUrl
+            } else {
+                val baseWithoutFile = baseUrl.substringBefore('?').substringBeforeLast('/') + "/"
+                baseWithoutFile + pathOrUrl.removePrefix("/")
             }
-            val text = conn.inputStream.bufferedReader().use { it.readText() }
-            if (text.contains("#EXT-X-STREAM-INF")) {
-                val lines = text.lines()
-                for (i in lines.indices) {
-                    if (lines[i].startsWith("#EXT-X-STREAM-INF")) {
-                        val nextLine = lines.getOrNull(i + 1)?.trim()
-                        if (nextLine != null && !nextLine.startsWith("#") && nextLine.isNotEmpty()) {
-                            mediaUrl = URI(streamUrl).resolve(nextLine).toString()
-                            break
+        }
+        return if (!pathOrUrl.contains('?') && baseUrl.contains('?')) {
+            val query = baseUrl.substringAfter('?')
+            if (resolved.contains('?')) resolved else "$resolved?$query"
+        } else {
+            resolved
+        }
+    }
+
+    private suspend fun recordStream(streamUrl: String, outputFile: File) {
+        val request = Request.Builder()
+            .url(streamUrl)
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android TV) TeleMate/1.0")
+            .header("Accept", "*/*")
+            .build()
+
+        val response = withContext(Dispatchers.IO) {
+            client.newCall(request).execute()
+        }
+
+        if (!response.isSuccessful) {
+            response.close()
+            return
+        }
+
+        val body = response.body ?: run {
+            response.close()
+            return
+        }
+
+        val finalUrl = response.request.url.toString()
+        val contentType = response.header("Content-Type").orEmpty()
+        val peekBytes = try { response.peekBody(1024).string().trimStart() } catch (_: Exception) { "" }
+
+        val isHls = streamUrl.contains(".m3u8", ignoreCase = true) ||
+                finalUrl.contains(".m3u8", ignoreCase = true) ||
+                contentType.contains("mpegurl", ignoreCase = true) ||
+                contentType.contains("application/x-mpegurl", ignoreCase = true) ||
+                peekBytes.startsWith("#EXTM3U")
+
+        if (isHls) {
+            val initialText = withContext(Dispatchers.IO) { body.string() }
+            response.close()
+            recordHls(finalUrl, initialText, outputFile)
+        } else {
+            withContext(Dispatchers.IO) {
+                body.byteStream().use { input ->
+                    FileOutputStream(outputFile, true).use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (currentCoroutineContext().isActive) {
+                            val read = input.read(buffer)
+                            if (read == -1) break
+                            output.write(buffer, 0, read)
                         }
                     }
                 }
             }
-        } catch (_: Exception) {}
-
-        val downloadedSegments = mutableSetOf<String>()
-        val baseUri = URI(mediaUrl)
-
-        while (currentCoroutineContext().isActive) {
-            try {
-                val conn = (URL(mediaUrl).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 5000
-                    readTimeout = 5000
-                    setRequestProperty("User-Agent", "TeleMate/1.0 (Android TV)")
-                    instanceFollowRedirects = true
-                }
-                val text = conn.inputStream.bufferedReader().use { it.readText() }
-                val lines = text.lines()
-                for (line in lines) {
-                    if (!currentCoroutineContext().isActive) break
-                    val trimmed = line.trim()
-                    if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
-
-                    val segUrl = try {
-                        baseUri.resolve(trimmed).toString()
-                    } catch (_: Exception) {
-                        trimmed
-                    }
-
-                    if (downloadedSegments.add(segUrl)) {
-                        try {
-                            val segConn = (URL(segUrl).openConnection() as HttpURLConnection).apply {
-                                connectTimeout = 5000
-                                readTimeout = 8000
-                                setRequestProperty("User-Agent", "TeleMate/1.0 (Android TV)")
-                                instanceFollowRedirects = true
-                            }
-                            if (segConn.responseCode in 200..299) {
-                                segConn.inputStream.use { input ->
-                                    FileOutputStream(outputFile, true).use { output ->
-                                        input.copyTo(output)
-                                    }
-                                }
-                            }
-                        } catch (_: Exception) {}
-                    }
-                }
-            } catch (_: Exception) {}
-            delay(1500L)
+            response.close()
         }
     }
 
-    private suspend fun recordDirect(streamUrl: String, outputFile: File) {
-        val conn = (URL(streamUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 8000
-            readTimeout = 8000
-            setRequestProperty("User-Agent", "TeleMate/1.0 (Android TV)")
-            instanceFollowRedirects = true
-        }
-        conn.inputStream.use { input ->
-            FileOutputStream(outputFile, true).use { output ->
-                val buffer = ByteArray(32 * 1024)
-                while (currentCoroutineContext().isActive) {
-                    val read = input.read(buffer)
-                    if (read == -1) break
-                    output.write(buffer, 0, read)
+    private suspend fun recordHls(initialUrl: String, initialText: String, outputFile: File) {
+        var mediaPlaylistUrl = initialUrl
+        var playlistText = initialText
+
+        if (!playlistText.contains("#EXT-X-TARGETDURATION")) {
+            for (line in playlistText.lines()) {
+                val trimmed = line.trim()
+                if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
+                    mediaPlaylistUrl = resolveUrl(initialUrl, trimmed)
+                    break
                 }
             }
+        }
+
+        val downloadedSegments = LinkedHashSet<String>()
+
+        while (currentCoroutineContext().isActive) {
+            var pollDelayMs = 2000L
+            try {
+                val req = Request.Builder()
+                    .url(mediaPlaylistUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android TV) TeleMate/1.0")
+                    .header("Accept", "*/*")
+                    .build()
+
+                val resp = withContext(Dispatchers.IO) {
+                    client.newCall(req).execute()
+                }
+
+                if (resp.isSuccessful) {
+                    val mediaText = withContext(Dispatchers.IO) { resp.body?.string().orEmpty() }
+                    resp.close()
+
+                    if (mediaText.contains("#EXT-X-STREAM-INF")) {
+                        for (line in mediaText.lines()) {
+                            val trimmed = line.trim()
+                            if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
+                                mediaPlaylistUrl = resolveUrl(mediaPlaylistUrl, trimmed)
+                                break
+                            }
+                        }
+                        continue
+                    }
+
+                    val targetMatch = Regex("""#EXT-X-TARGETDURATION:(\d+)""").find(mediaText)
+                    if (targetMatch != null) {
+                        val durSec = targetMatch.groupValues[1].toLongOrNull() ?: 3L
+                        pollDelayMs = (durSec * 1000L / 2).coerceIn(1000L, 3500L)
+                    }
+
+                    for (line in mediaText.lines()) {
+                        if (!currentCoroutineContext().isActive) break
+                        val trimmed = line.trim()
+                        if (trimmed.isEmpty()) continue
+
+                        if (trimmed.startsWith("#EXT-X-MAP:")) {
+                            val mapUri = trimmed.substringAfter("URI=\"", "").substringBefore("\"", "")
+                            if (mapUri.isNotEmpty()) {
+                                val mapUrl = resolveUrl(mediaPlaylistUrl, mapUri)
+                                if (downloadedSegments.add(mapUrl)) {
+                                    downloadChunk(mapUrl, outputFile)
+                                }
+                            }
+                            continue
+                        }
+
+                        if (trimmed.startsWith("#")) continue
+
+                        val segUrl = resolveUrl(mediaPlaylistUrl, trimmed)
+                        if (downloadedSegments.add(segUrl)) {
+                            downloadChunk(segUrl, outputFile)
+                        }
+                    }
+
+                    if (downloadedSegments.size > 200) {
+                        val it = downloadedSegments.iterator()
+                        if (it.hasNext()) {
+                            it.next()
+                            it.remove()
+                        }
+                    }
+                } else {
+                    resp.close()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            delay(pollDelayMs)
+        }
+    }
+
+    private suspend fun downloadChunk(url: String, outputFile: File) {
+        try {
+            val segReq = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android TV) TeleMate/1.0")
+                .header("Accept", "*/*")
+                .build()
+
+            val segResp = withContext(Dispatchers.IO) {
+                client.newCall(segReq).execute()
+            }
+
+            if (segResp.isSuccessful) {
+                withContext(Dispatchers.IO) {
+                    segResp.body?.byteStream()?.use { input ->
+                        FileOutputStream(outputFile, true).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                }
+            }
+            segResp.close()
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 }
 
 object RecordingsManager {
-    private const val PREFS_NAME = "telemate_recordings_prefs"
+    private const val PREFS_NAME = "tivimate_recordings_pref"
     private const val KEY_RECORDINGS = "saved_recordings"
 
     fun getRecordings(context: Context): List<TvRecording> {
@@ -181,46 +305,42 @@ object RecordingsManager {
             val array = JSONArray(json)
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
+                val id = obj.getString("id")
+                var streamUrl = obj.getString("streamUrl")
+                val localRecFile = File(context.filesDir, "recordings/rec_${id}.ts")
+                if (localRecFile.exists() && localRecFile.length() > 0L) {
+                    streamUrl = localRecFile.absolutePath
+                } else if (!streamUrl.startsWith("/")) {
+                    streamUrl = localRecFile.absolutePath
+                }
                 list.add(
                     TvRecording(
-                        id = obj.getString("id"),
+                        id = id,
                         channelId = obj.getInt("channelId"),
                         channelName = obj.getString("channelName"),
                         showTitle = obj.optString("showTitle", "Live Broadcast"),
                         coverUrl = obj.optString("coverUrl", "").takeIf { it != "null" && it.isNotBlank() },
-                        streamUrl = obj.getString("streamUrl"),
+                        streamUrl = streamUrl,
                         durationSeconds = obj.optInt("durationSeconds", 0),
                         timestamp = obj.optLong("timestamp", System.currentTimeMillis())
                     )
                 )
             }
         } catch (_: Exception) {}
-        return list.sortedByDescending { it.timestamp }
+        return list
     }
 
     fun saveRecording(context: Context, recording: TvRecording) {
         val current = getRecordings(context).toMutableList()
-        current.removeAll { it.id == recording.id }
-        current.add(0, recording)
-
-        val array = JSONArray()
-        for (item in current) {
-            val obj = JSONObject().apply {
-                put("id", item.id)
-                put("channelId", item.channelId)
-                put("channelName", item.channelName)
-                put("showTitle", item.showTitle)
-                put("coverUrl", item.coverUrl ?: "")
-                put("streamUrl", item.streamUrl)
-                put("durationSeconds", item.durationSeconds)
-                put("timestamp", item.timestamp)
-            }
-            array.put(obj)
+        val sanitizedStreamUrl = if (recording.streamUrl.startsWith("/")) {
+            recording.streamUrl
+        } else {
+            File(context.filesDir, "recordings/rec_${recording.id}.ts").absolutePath
         }
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_RECORDINGS, array.toString())
-            .commit()
+        val sanitizedRecording = recording.copy(streamUrl = sanitizedStreamUrl)
+        current.removeAll { it.id == sanitizedRecording.id }
+        current.add(0, sanitizedRecording)
+        saveRecordingsList(context, current)
     }
 
     fun deleteRecording(context: Context, id: String) {
@@ -228,30 +348,34 @@ object RecordingsManager {
         val toDelete = current.find { it.id == id }
         if (toDelete != null) {
             try {
-                val file = File(toDelete.streamUrl)
-                if (file.exists()) {
-                    file.delete()
-                }
+                val f1 = File(toDelete.streamUrl)
+                if (f1.exists()) f1.delete()
+            } catch (_: Exception) {}
+            try {
+                val f2 = File(context.filesDir, "recordings/rec_${toDelete.id}.ts")
+                if (f2.exists()) f2.delete()
             } catch (_: Exception) {}
         }
         val updated = current.filterNot { it.id == id }
+        saveRecordingsList(context, updated)
+    }
+
+    private fun saveRecordingsList(context: Context, list: List<TvRecording>) {
         val array = JSONArray()
-        for (item in updated) {
+        for (rec in list) {
             val obj = JSONObject().apply {
-                put("id", item.id)
-                put("channelId", item.channelId)
-                put("channelName", item.channelName)
-                put("showTitle", item.showTitle)
-                put("coverUrl", item.coverUrl ?: "")
-                put("streamUrl", item.streamUrl)
-                put("durationSeconds", item.durationSeconds)
-                put("timestamp", item.timestamp)
+                put("id", rec.id)
+                put("channelId", rec.channelId)
+                put("channelName", rec.channelName)
+                put("showTitle", rec.showTitle)
+                put("coverUrl", rec.coverUrl ?: "")
+                put("streamUrl", rec.streamUrl)
+                put("durationSeconds", rec.durationSeconds)
+                put("timestamp", rec.timestamp)
             }
             array.put(obj)
         }
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_RECORDINGS, array.toString())
-            .commit()
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_RECORDINGS, array.toString()).apply()
     }
 }
