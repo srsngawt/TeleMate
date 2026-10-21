@@ -512,11 +512,8 @@ internal class PlaylistRepositoryImpl @Inject constructor(
         playlistUrl: String,
         @PlaylistStrategy playlistStrategy: Int,
     ) {
-        when (playlistStrategy) {
-            PlaylistStrategy.ALL -> channelDao.deleteByPlaylistUrl(playlistUrl)
-            PlaylistStrategy.KEEP ->
-                channelDao.deleteByPlaylistUrlIgnoreFavOrHidden(playlistUrl)
-        }
+        // Always protect user favorites and hidden channel preferences from being erased
+        channelDao.deleteByPlaylistUrlIgnoreFavOrHidden(playlistUrl)
     }
 
     private suspend fun currentXtreamPlaylist(

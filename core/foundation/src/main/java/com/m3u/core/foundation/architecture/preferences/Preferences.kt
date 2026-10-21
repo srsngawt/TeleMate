@@ -151,7 +151,7 @@ fun themePreferencesOf(
 }
 
 private val PREFERENCES: Map<Preferences.Key<*>, Any> = buildMap {
-    put(PreferencesKeys.PLAYLIST_STRATEGY, PlaylistStrategy.ALL)
+    put(PreferencesKeys.PLAYLIST_STRATEGY, PlaylistStrategy.KEEP)
     put(PreferencesKeys.ROW_COUNT, 1)
     put(PreferencesKeys.CONNECT_TIMEOUT, ConnectTimeout.SHORT)
     put(PreferencesKeys.GOD_MODE, false)

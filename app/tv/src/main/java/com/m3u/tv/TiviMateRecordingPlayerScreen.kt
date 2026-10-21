@@ -92,11 +92,23 @@ fun TiviMateRecordingPlayerScreen(
         }
     }
 
-    // Auto-hide controls after 4.5 seconds of inactivity
+    // Auto-hide controls after 4.5 seconds of inactivity, and manage remote focus
+    val playPauseFocusRequester = remember { FocusRequester() }
+    val rootFocusRequester = remember { FocusRequester() }
+
     LaunchedEffect(showControls) {
         if (showControls) {
+            delay(100)
+            try {
+                playPauseFocusRequester.requestFocus()
+            } catch (_: Exception) {}
             delay(4500)
             showControls = false
+        } else {
+            delay(50)
+            try {
+                rootFocusRequester.requestFocus()
+            } catch (_: Exception) {}
         }
     }
 
@@ -108,12 +120,16 @@ fun TiviMateRecordingPlayerScreen(
         }
     }
 
-    BackHandler {
-        onClose()
+    BackHandler(enabled = showControls) {
+        showControls = false
+        try {
+            rootFocusRequester.requestFocus()
+        } catch (_: Exception) {}
     }
 
-    val playPauseFocusRequester = remember { FocusRequester() }
-    val rootFocusRequester = remember { FocusRequester() }
+    BackHandler(enabled = !showControls) {
+        onClose()
+    }
 
     LaunchedEffect(Unit) {
         delay(150)
@@ -408,6 +424,7 @@ fun TiviMateRecordingPlayerScreen(
                                 icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                 label = if (isPlaying) "Pause" else "Play",
                                 onClick = onPlayPause,
+                                focusRequester = playPauseFocusRequester,
                                 isPrimary = true
                             )
 
@@ -435,6 +452,7 @@ private fun RecordingControlButton(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
+    focusRequester: FocusRequester? = null,
     isPrimary: Boolean = false
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -458,6 +476,7 @@ private fun RecordingControlButton(
                 ),
                 RoundedCornerShape(8.dp)
             )
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onClick() }
             .onPreviewKeyEvent { event ->

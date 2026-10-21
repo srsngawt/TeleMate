@@ -1,5 +1,6 @@
 package com.m3u.tv
 
+import android.app.Activity
 import android.content.Intent
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
@@ -60,6 +61,7 @@ fun App(
     var surface by remember { mutableStateOf(TvSurface.Browse) }
     var activeRecording by remember { mutableStateOf<TvRecording?>(null) }
     var currentCategoryName by remember { mutableStateOf("All channels") }
+    var showExitDialog by remember { mutableStateOf(false) }
     val closePlayer = {
         activeRecording = null
         surface = TvSurface.Browse
@@ -76,12 +78,15 @@ fun App(
         providerSubscriptionVisible = state.providerSubscriptionForm != null,
         extensionSettingsVisible = state.extensionSettings != null,
     )
-    BackHandler(enabled = backTarget != TvAppBackTarget.ACTIVITY) {
-        when (backTarget) {
-            TvAppBackTarget.PLAYER -> closePlayer()
-            TvAppBackTarget.PROVIDER_SUBSCRIPTION -> viewModel.closeProviderSubscription()
-            TvAppBackTarget.EXTENSION_SETTINGS -> viewModel.closeExtensionSettings()
-            TvAppBackTarget.ACTIVITY -> Unit
+    BackHandler(enabled = true) {
+        when {
+            showExitDialog -> showExitDialog = false
+            backTarget == TvAppBackTarget.PLAYER -> closePlayer()
+            backTarget == TvAppBackTarget.PROVIDER_SUBSCRIPTION -> viewModel.closeProviderSubscription()
+            backTarget == TvAppBackTarget.EXTENSION_SETTINGS -> viewModel.closeExtensionSettings()
+            backTarget == TvAppBackTarget.ACTIVITY -> {
+                showExitDialog = true
+            }
         }
     }
 
@@ -213,6 +218,17 @@ fun App(
                     .padding(end = 24.dp, bottom = 12.dp)
                     .background(TvColors.Surface.copy(alpha = 0.85f), RoundedCornerShape(6.dp))
                     .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+
+        if (showExitDialog) {
+            TiviMateExitDialog(
+                onConfirmExit = {
+                    (context as? Activity)?.finish()
+                },
+                onDismiss = {
+                    showExitDialog = false
+                }
             )
         }
     }

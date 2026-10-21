@@ -79,6 +79,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.TrackSelectionParameters
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
@@ -172,24 +173,37 @@ fun TiviMatePlayerScreen(
         }
     }
 
-    // Auto-focus controls when infobar opens
-    LaunchedEffect(showInfobar) {
-        if (showInfobar) {
-            delay(120)
-            try {
-                actionButtonsFocusRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
-    }
-
-    // Auto-focus quick channel drawer when opened
-    LaunchedEffect(showQuickChannelDrawer) {
-        if (showQuickChannelDrawer) {
-            delay(100)
-            try {
-                drawerListState.scrollToItem(maxOf(0, currentChannelIndex - 2))
-                drawerFocusRequester.requestFocus()
-            } catch (_: Exception) {}
+    // Auto-focus controls when infobar or drawer opens, and restore focus to player when closed
+    LaunchedEffect(showInfobar, showQuickChannelDrawer, showLanguageDialog, showQualityDialog) {
+        when {
+            showLanguageDialog || showQualityDialog -> {
+                // Dialog handles its own focus
+            }
+            showQuickChannelDrawer -> {
+                delay(100)
+                try {
+                    drawerListState.scrollToItem(maxOf(0, currentChannelIndex - 2))
+                    drawerFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            }
+            showInfobar -> {
+                delay(100)
+                try {
+                    if (liveDelaySeconds > 0) {
+                        sliderFocusRequester.requestFocus()
+                    } else {
+                        actionButtonsFocusRequester.requestFocus()
+                    }
+                } catch (_: Exception) {}
+            }
+            else -> {
+                // When ALL overlays (infobar, drawer, dialogs) close:
+                // Focus MUST be immediately returned to the root player!
+                delay(50)
+                try {
+                    playerFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            }
         }
     }
 
@@ -614,6 +628,13 @@ fun TiviMatePlayerScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
+                val closeControlsAndFocusPlayer: () -> Unit = {
+                    showInfobar = false
+                    try {
+                        playerFocusRequester.requestFocus()
+                    } catch (_: Exception) {}
+                }
+
                 // Interactive Video Seek Slider
                 TiviMateSeekSlider(
                     focusRequester = sliderFocusRequester,
@@ -625,7 +646,7 @@ fun TiviMatePlayerScreen(
                             actionButtonsFocusRequester.requestFocus()
                         } catch (_: Exception) {}
                     },
-                    onCloseControls = { showInfobar = false }
+                    onCloseControls = closeControlsAndFocusPlayer
                 )
 
                 Spacer(modifier = Modifier.height(18.dp))
@@ -640,7 +661,7 @@ fun TiviMatePlayerScreen(
                         label = "TV guide",
                         focusRequester = actionButtonsFocusRequester,
                         onNavigateUp = { sliderFocusRequester.requestFocus() },
-                        onNavigateDown = { showInfobar = false },
+                        onNavigateDown = closeControlsAndFocusPlayer,
                         onClick = onBackToGuide
                     )
 
@@ -648,7 +669,7 @@ fun TiviMatePlayerScreen(
                         icon = Icons.Rounded.Language,
                         label = if (cleanPlayerLang.isNotBlank()) "Language ($cleanPlayerLang)" else "Language",
                         onNavigateUp = { sliderFocusRequester.requestFocus() },
-                        onNavigateDown = { showInfobar = false },
+                        onNavigateDown = closeControlsAndFocusPlayer,
                         onClick = { showLanguageDialog = true }
                     )
 
@@ -656,7 +677,7 @@ fun TiviMatePlayerScreen(
                         icon = Icons.Rounded.HighQuality,
                         label = "Quality ($displayedQuality)",
                         onNavigateUp = { sliderFocusRequester.requestFocus() },
-                        onNavigateDown = { showInfobar = false },
+                        onNavigateDown = closeControlsAndFocusPlayer,
                         onClick = { showQualityDialog = true }
                     )
 
@@ -669,7 +690,7 @@ fun TiviMatePlayerScreen(
                         } else "Record",
                         tint = if (isRecording) TvColors.Danger else Color.White,
                         onNavigateUp = { sliderFocusRequester.requestFocus() },
-                        onNavigateDown = { showInfobar = false },
+                        onNavigateDown = closeControlsAndFocusPlayer,
                         onClick = {
                             if (!isRecording) {
                                 isRecording = true
@@ -698,7 +719,7 @@ fun TiviMatePlayerScreen(
                         label = if (isFavorite) "Favorite" else "Add Favorite",
                         tint = if (isFavorite) TvColors.Danger else Color.White,
                         onNavigateUp = { sliderFocusRequester.requestFocus() },
-                        onNavigateDown = { showInfobar = false },
+                        onNavigateDown = closeControlsAndFocusPlayer,
                         onClick = { channel?.let(onToggleFavorite) }
                     )
 
@@ -706,7 +727,7 @@ fun TiviMatePlayerScreen(
                         icon = Icons.AutoMirrored.Rounded.FormatListBulleted,
                         label = "Channels",
                         onNavigateUp = { sliderFocusRequester.requestFocus() },
-                        onNavigateDown = { showInfobar = false },
+                        onNavigateDown = closeControlsAndFocusPlayer,
                         onClick = { showQuickChannelDrawer = true }
                     )
                 }
@@ -907,6 +928,12 @@ fun TiviMatePlayerScreen(
                                                 p.trackSelectionParameters = p.trackSelectionParameters
                                                     .buildUpon()
                                                     .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, i))
+                                                    .setAudioOffloadPreferences(
+                                                        TrackSelectionParameters.AudioOffloadPreferences.DEFAULT
+                                                            .buildUpon()
+                                                            .setAudioOffloadMode(TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED)
+                                                            .build()
+                                                    )
                                                     .build()
                                             }
                                             showLanguageDialog = false

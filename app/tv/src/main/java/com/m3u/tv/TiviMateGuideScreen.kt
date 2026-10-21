@@ -68,6 +68,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -80,6 +81,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -405,6 +407,7 @@ fun TiviMateGuideScreen(
     Row(
         modifier = Modifier
             .fillMaxSize()
+            .focusProperties { canFocus = isGuideVisible }
             .background(TvColors.Background)
             .onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
@@ -1683,8 +1686,18 @@ private fun TiviMateSearchDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var searchQuery by remember { mutableStateOf("") }
-    val searchFocusRequester = remember { FocusRequester() }
+    var isEditing by remember { mutableStateOf(false) }
+
+    val rootFocusRequester = remember { FocusRequester() }
+    val micFocusRequester = remember { FocusRequester() }
+    val searchBoxFocusRequester = remember { FocusRequester() }
+    val textFieldFocusRequester = remember { FocusRequester() }
+    val firstResultFocusRequester = remember { FocusRequester() }
+
+    var isMicFocused by remember { mutableStateOf(false) }
+    var isSearchBoxFocused by remember { mutableStateOf(false) }
 
     // Voice search launcher
     val speechLauncher = rememberLauncherForActivityResult(
@@ -1696,6 +1709,10 @@ private fun TiviMateSearchDialog(
                 ?.firstOrNull()
             if (!spokenText.isNullOrBlank()) {
                 searchQuery = spokenText
+                isEditing = false
+                try {
+                    searchBoxFocusRequester.requestFocus()
+                } catch (_: Exception) {}
             }
         }
     }
@@ -1728,14 +1745,38 @@ private fun TiviMateSearchDialog(
         }
     }
 
+    // Initial state: Request focus on root invisible container, so neither Mic nor Search box has focus
     LaunchedEffect(Unit) {
-        delay(150)
+        delay(100)
         try {
-            searchFocusRequester.requestFocus()
+            rootFocusRequester.requestFocus()
         } catch (_: Exception) {}
     }
 
-    BackHandler { onDismiss() }
+    // When isEditing toggles true, focus text field and show keyboard
+    LaunchedEffect(isEditing) {
+        if (isEditing) {
+            delay(50)
+            try {
+                textFieldFocusRequester.requestFocus()
+                keyboardController?.show()
+            } catch (_: Exception) {}
+        }
+    }
+
+    // When soft keyboard is open, Back closes the keyboard and stays in the Search dialog
+    BackHandler(enabled = isEditing) {
+        keyboardController?.hide()
+        isEditing = false
+        try {
+            searchBoxFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+    }
+
+    // When soft keyboard is closed, Back closes the Search dialog
+    BackHandler(enabled = !isEditing) {
+        onDismiss()
+    }
 
     Box(
         contentAlignment = Alignment.Center,
@@ -1743,6 +1784,24 @@ private fun TiviMateSearchDialog(
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.88f))
             .clickable { onDismiss() }
+            .focusRequester(rootFocusRequester)
+            .onPreviewKeyEvent { event ->
+                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                    when (event.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT,
+                        KeyEvent.KEYCODE_DPAD_RIGHT,
+                        KeyEvent.KEYCODE_DPAD_DOWN,
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            if (!isMicFocused && !isSearchBoxFocused && !isEditing) {
+                                micFocusRequester.requestFocus()
+                                true
+                            } else false
+                        }
+                        else -> false
+                    }
+                } else false
+            }
+            .focusable()
     ) {
         Column(
             modifier = Modifier
@@ -1800,48 +1859,13 @@ private fun TiviMateSearchDialog(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Search input field with Mic Button
+            // Search input field with Mic Button (MIC ON THE LEFT, SEARCH BOX ON THE RIGHT)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                BasicTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    singleLine = true,
-                    textStyle = TextStyle(
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontFamily = TvFonts.Body
-                    ),
-                    cursorBrush = SolidColor(TvColors.Focus),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = {}),
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(TvColors.BackgroundSoft)
-                        .border(BorderStroke(1.dp, TvColors.BorderSubtle), RoundedCornerShape(10.dp))
-                        .focusRequester(searchFocusRequester)
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    decorationBox = { innerTextField ->
-                        Box {
-                            if (searchQuery.isEmpty()) {
-                                Text(
-                                    text = "Type channel or category name...",
-                                    color = TvColors.TextMuted,
-                                    fontSize = 15.sp,
-                                    fontFamily = TvFonts.Body
-                                )
-                            }
-                            innerTextField()
-                        }
-                    }
-                )
-
-                // Voice Search Mic Button
-                var isMicFocused by remember { mutableStateOf(false) }
+                // 1. Voice Search Mic Button (LEFT SIDE)
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
@@ -1857,15 +1881,29 @@ private fun TiviMateSearchDialog(
                             ),
                             RoundedCornerShape(10.dp)
                         )
+                        .focusRequester(micFocusRequester)
                         .onFocusChanged { isMicFocused = it.isFocused }
                         .clickable { startVoiceSearch() }
                         .onPreviewKeyEvent { event ->
-                            if ((event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) &&
-                                (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                                 event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER)
-                            ) {
-                                startVoiceSearch()
-                                true
+                            if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                when (event.nativeKeyEvent.keyCode) {
+                                    KeyEvent.KEYCODE_DPAD_CENTER,
+                                    KeyEvent.KEYCODE_ENTER -> {
+                                        startVoiceSearch()
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                        searchBoxFocusRequester.requestFocus()
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                        if (filteredChannels.isNotEmpty()) {
+                                            firstResultFocusRequester.requestFocus()
+                                            true
+                                        } else false
+                                    }
+                                    else -> false
+                                }
                             } else false
                         }
                         .focusable()
@@ -1876,6 +1914,131 @@ private fun TiviMateSearchDialog(
                         tint = if (isMicFocused) Color.White else TvColors.Accent,
                         modifier = Modifier.size(22.dp)
                     )
+                }
+
+                // 2. Search Text Box (RIGHT SIDE OF MIC)
+                Box(
+                    contentAlignment = Alignment.CenterStart,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(TvColors.BackgroundSoft)
+                        .border(
+                            BorderStroke(
+                                if (isSearchBoxFocused || isEditing) 1.5.dp else 1.dp,
+                                if (isSearchBoxFocused || isEditing) TvColors.FocusGlow else TvColors.BorderSubtle
+                            ),
+                            RoundedCornerShape(10.dp)
+                        )
+                        .focusRequester(searchBoxFocusRequester)
+                        .onFocusChanged { isSearchBoxFocused = it.isFocused }
+                        .clickable {
+                            isEditing = true
+                        }
+                        .onPreviewKeyEvent { event ->
+                            if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                if (isEditing) {
+                                    when (event.nativeKeyEvent.keyCode) {
+                                        KeyEvent.KEYCODE_BACK -> {
+                                            keyboardController?.hide()
+                                            isEditing = false
+                                            searchBoxFocusRequester.requestFocus()
+                                            true
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                            if (filteredChannels.isNotEmpty()) {
+                                                keyboardController?.hide()
+                                                isEditing = false
+                                                firstResultFocusRequester.requestFocus()
+                                                true
+                                            } else false
+                                        }
+                                        else -> false
+                                    }
+                                } else {
+                                    when (event.nativeKeyEvent.keyCode) {
+                                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                            micFocusRequester.requestFocus()
+                                            true
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_CENTER,
+                                        KeyEvent.KEYCODE_ENTER -> {
+                                            isEditing = true
+                                            true
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                            if (filteredChannels.isNotEmpty()) {
+                                                firstResultFocusRequester.requestFocus()
+                                                true
+                                            } else false
+                                        }
+                                        else -> false
+                                    }
+                                }
+                            } else false
+                        }
+                        .focusable()
+                        .padding(horizontal = 14.dp)
+                ) {
+                    if (isEditing) {
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            singleLine = true,
+                            textStyle = TextStyle(
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontFamily = TvFonts.Body
+                            ),
+                            cursorBrush = SolidColor(TvColors.Focus),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(
+                                onSearch = {
+                                    keyboardController?.hide()
+                                    isEditing = false
+                                    searchBoxFocusRequester.requestFocus()
+                                },
+                                onDone = {
+                                    keyboardController?.hide()
+                                    isEditing = false
+                                    searchBoxFocusRequester.requestFocus()
+                                }
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(textFieldFocusRequester),
+                            decorationBox = { innerTextField ->
+                                Box(contentAlignment = Alignment.CenterStart) {
+                                    if (searchQuery.isEmpty()) {
+                                        Text(
+                                            text = "Type channel or category name...",
+                                            color = TvColors.TextMuted,
+                                            fontSize = 15.sp,
+                                            fontFamily = TvFonts.Body
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            }
+                        )
+                    } else {
+                        if (searchQuery.isEmpty()) {
+                            Text(
+                                text = "Type channel or category name...",
+                                color = TvColors.TextMuted,
+                                fontSize = 15.sp,
+                                fontFamily = TvFonts.Body
+                            )
+                        } else {
+                            Text(
+                                text = searchQuery,
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontFamily = TvFonts.Body
+                            )
+                        }
+                    }
                 }
             }
 
@@ -1948,10 +2111,14 @@ private fun TiviMateSearchDialog(
                     itemsIndexed(filteredChannels) { index, channel ->
                         var isItemFocused by remember { mutableStateOf(false) }
 
+                        val itemModifier = if (index == 0) {
+                            Modifier.focusRequester(firstResultFocusRequester)
+                        } else Modifier
+
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier
+                            modifier = itemModifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(
@@ -1967,14 +2134,15 @@ private fun TiviMateSearchDialog(
                                 .onFocusChanged { isItemFocused = it.isFocused }
                                 .clickable { onSelectChannel(channel) }
                                 .onPreviewKeyEvent { event ->
-                                    if ((event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN || event.nativeKeyEvent.action == KeyEvent.ACTION_UP) &&
-                                        (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                                         event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER)
-                                    ) {
-                                        if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                    if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                        if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP && index == 0) {
+                                            searchBoxFocusRequester.requestFocus()
+                                            true
+                                        } else if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                                                   event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER) {
                                             onSelectChannel(channel)
-                                        }
-                                        true
+                                            true
+                                        } else false
                                     } else false
                                 }
                                 .focusable()
@@ -2060,6 +2228,7 @@ private fun TiviMateRecordingsDialog(
     onDismiss: () -> Unit,
     onPlayRecording: (TvRecording) -> Unit
 ) {
+    BackHandler { onDismiss() }
     val context = LocalContext.current
     var recordings by remember { mutableStateOf(RecordingsManager.getRecordings(context)) }
 
@@ -2354,6 +2523,7 @@ private fun TiviMateRecordingsDialog(
 private fun TiviMateSettingsDialog(
     onDismiss: () -> Unit
 ) {
+    BackHandler { onDismiss() }
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier

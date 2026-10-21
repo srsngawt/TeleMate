@@ -13,6 +13,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackGroup
 import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.datasource.DataSource
@@ -629,14 +630,14 @@ class PlayerManagerImpl @Inject constructor(
         .setRenderersFactory(renderersFactory)
         .setTrackSelector(createTrackSelector(tunneling))
         .setLoadControl(createLoadControl())
-        .setHandleAudioBecomingNoisy(true)
+        .setHandleAudioBecomingNoisy(false)
         .build()
         .apply {
             val attributes = AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
                 .build()
-            setAudioAttributes(attributes, true)
+            setAudioAttributes(attributes, false)
             playWhenReady = true
             addListener(listener)
         }
@@ -708,6 +709,12 @@ class PlayerManagerImpl @Inject constructor(
                 buildUponParameters()
                     .setForceHighestSupportedBitrate(true)
                     .setTunnelingEnabled(false)
+                    .setAudioOffloadPreferences(
+                        TrackSelectionParameters.AudioOffloadPreferences.DEFAULT
+                            .buildUpon()
+                            .setAudioOffloadMode(TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED)
+                            .build()
+                    )
             )
         }
     }

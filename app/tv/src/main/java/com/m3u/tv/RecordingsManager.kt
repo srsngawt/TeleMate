@@ -54,7 +54,7 @@ object RecordingsManager {
                 )
             }
         } catch (_: Exception) {}
-        return list.reversed() // Latest first
+        return list.sortedByDescending { it.timestamp }
     }
 
     fun saveRecording(context: Context, recording: TvRecording) {
@@ -79,7 +79,7 @@ object RecordingsManager {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_RECORDINGS, array.toString())
-            .apply()
+            .commit()
     }
 
     fun deleteRecording(context: Context, id: String) {
@@ -101,6 +101,6 @@ object RecordingsManager {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_RECORDINGS, array.toString())
-            .apply()
+            .commit()
     }
 }
