@@ -143,12 +143,25 @@ fun TiviMateExitDialog(
                         .onFocusChanged { isCancelFocused = it.isFocused }
                         .clickable { onDismiss() }
                         .onPreviewKeyEvent { event ->
-                            if ((event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) &&
-                                (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                                 event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER)
-                            ) {
-                                onDismiss()
-                                true
+                            if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                when (event.nativeKeyEvent.keyCode) {
+                                    KeyEvent.KEYCODE_DPAD_CENTER,
+                                    KeyEvent.KEYCODE_ENTER -> {
+                                        onDismiss()
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                        exitFocusRequester.requestFocus()
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_LEFT,
+                                    KeyEvent.KEYCODE_DPAD_UP,
+                                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                        // Trap focus strictly inside the dialog
+                                        true
+                                    }
+                                    else -> false
+                                }
                             } else false
                         }
                         .focusable()
@@ -182,12 +195,25 @@ fun TiviMateExitDialog(
                         .onFocusChanged { isExitFocused = it.isFocused }
                         .clickable { onConfirmExit() }
                         .onPreviewKeyEvent { event ->
-                            if ((event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) &&
-                                (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                                 event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER)
-                            ) {
-                                onConfirmExit()
-                                true
+                            if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                when (event.nativeKeyEvent.keyCode) {
+                                    KeyEvent.KEYCODE_DPAD_CENTER,
+                                    KeyEvent.KEYCODE_ENTER -> {
+                                        onConfirmExit()
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                        cancelFocusRequester.requestFocus()
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_RIGHT,
+                                    KeyEvent.KEYCODE_DPAD_UP,
+                                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                        // Trap focus strictly inside the dialog - never escape to the right!
+                                        true
+                                    }
+                                    else -> false
+                                }
                             } else false
                         }
                         .focusable()

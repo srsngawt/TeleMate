@@ -393,21 +393,10 @@ fun TiviMateGuideScreen(
         }
     }
 
-    // Auto-play the focused channel stream (debounced to prevent stream hammering/blinking)
-    LaunchedEffect(focusedUnifiedChannel, activeLanguage, activeQuality, player) {
-        if (player != null && focusedUnifiedChannel != null) {
-            delay(500) // Debounce rapid channel navigation
-            val stream = focusedUnifiedChannel.getStreamFor(activeLanguage, activeQuality)
-            if (stream.id != activeChannel?.id) {
-                onPlayChannel(stream)
-            }
-        }
-    }
-
     Row(
         modifier = Modifier
             .fillMaxSize()
-            .focusProperties { canFocus = isGuideVisible }
+            .focusProperties { canFocus = isGuideVisible && !showSearchOverlay && !showRecordingsDialog && !showSettingsDialog }
             .background(TvColors.Background)
             .onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
@@ -1274,6 +1263,18 @@ fun TiviMateGuideScreen(
                                                             }
                                                         }
                                                         true
+                                                    }
+                                                    KeyEvent.KEYCODE_DPAD_UP -> {
+                                                        if (index == 0) {
+                                                            // Already at top channel: do nothing, consume event so focus never leaves channel list!
+                                                            true
+                                                        } else false
+                                                    }
+                                                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                                        if (index == displayedChannels.size - 1) {
+                                                            // Already at bottom channel: do nothing, consume event so focus never leaves channel list!
+                                                            true
+                                                        } else false
                                                     }
                                                     KeyEvent.KEYCODE_DPAD_LEFT -> {
                                                         categoryFocusRequester.requestFocus()
@@ -2274,13 +2275,32 @@ private fun TiviMateRecordingsDialog(
                     )
                 }
 
+                var isCloseFocused by remember { mutableStateOf(false) }
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(28.dp)
+                        .size(32.dp)
                         .clip(CircleShape)
-                        .background(TvColors.SurfaceRaised)
+                        .background(if (isCloseFocused) TvColors.Focus else TvColors.SurfaceRaised)
+                        .border(
+                            BorderStroke(
+                                if (isCloseFocused) 1.5.dp else 1.dp,
+                                if (isCloseFocused) TvColors.FocusGlow else TvColors.BorderSubtle
+                            ),
+                            CircleShape
+                        )
+                        .onFocusChanged { isCloseFocused = it.isFocused }
                         .clickable { onDismiss() }
+                        .onPreviewKeyEvent { event ->
+                            if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                                    event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER) {
+                                    onDismiss()
+                                    true
+                                } else false
+                            } else false
+                        }
+                        .focusable()
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Close,
@@ -2566,13 +2586,32 @@ private fun TiviMateSettingsDialog(
                     )
                 }
 
+                var isCloseFocused by remember { mutableStateOf(false) }
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(28.dp)
+                        .size(32.dp)
                         .clip(CircleShape)
-                        .background(TvColors.SurfaceRaised)
+                        .background(if (isCloseFocused) TvColors.Focus else TvColors.SurfaceRaised)
+                        .border(
+                            BorderStroke(
+                                if (isCloseFocused) 1.5.dp else 1.dp,
+                                if (isCloseFocused) TvColors.FocusGlow else TvColors.BorderSubtle
+                            ),
+                            CircleShape
+                        )
+                        .onFocusChanged { isCloseFocused = it.isFocused }
                         .clickable { onDismiss() }
+                        .onPreviewKeyEvent { event ->
+                            if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                                    event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER) {
+                                    onDismiss()
+                                    true
+                                } else false
+                            } else false
+                        }
+                        .focusable()
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Close,

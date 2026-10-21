@@ -5,6 +5,7 @@ import android.content.Intent
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -119,89 +120,95 @@ fun App(
             .background(TvColors.Background)
             .windowInsetsPadding(WindowInsets.safeDrawing)
     ) {
-        TiviMateGuideScreen(
-            channels = state.channels,
-            favoriteChannels = state.favorites,
-            player = if (surface == TvSurface.Browse && activeRecording == null) player else null,
-            activeChannel = currentChannel,
-            currentProgrammes = state.currentProgrammes,
-            initialCategory = currentCategoryName,
-            isGuideVisible = surface == TvSurface.Browse,
-            onCategoryChanged = { currentCategoryName = it },
-            onPlayChannel = { channel ->
-                activeRecording = null
-                viewModel.play(channel)
-            },
-            onToggleFavorite = { channel ->
-                viewModel.toggleFavorite(channel)
-            },
-            onOpenFullscreen = {
-                surface = TvSurface.Player
-            },
-            onPlayRecording = { rec ->
-                activeRecording = rec
-                val matchingChannel = state.channels.find { it.id == rec.channelId || it.url == rec.streamUrl }
-                if (matchingChannel != null) {
-                    viewModel.play(matchingChannel)
-                } else {
-                    viewModel.play(
-                        com.m3u.data.database.model.Channel(
-                            id = rec.channelId,
-                            title = rec.channelName,
-                            url = rec.streamUrl,
-                            playlistUrl = "",
-                            category = "Recordings",
-                            cover = rec.coverUrl
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .focusProperties { canFocus = !showExitDialog }
+        ) {
+            TiviMateGuideScreen(
+                channels = state.channels,
+                favoriteChannels = state.favorites,
+                player = if (surface == TvSurface.Browse && activeRecording == null) player else null,
+                activeChannel = currentChannel,
+                currentProgrammes = state.currentProgrammes,
+                initialCategory = currentCategoryName,
+                isGuideVisible = surface == TvSurface.Browse,
+                onCategoryChanged = { currentCategoryName = it },
+                onPlayChannel = { channel ->
+                    activeRecording = null
+                    viewModel.play(channel)
+                },
+                onToggleFavorite = { channel ->
+                    viewModel.toggleFavorite(channel)
+                },
+                onOpenFullscreen = {
+                    surface = TvSurface.Player
+                },
+                onPlayRecording = { rec ->
+                    activeRecording = rec
+                    val matchingChannel = state.channels.find { it.id == rec.channelId || it.url == rec.streamUrl }
+                    if (matchingChannel != null) {
+                        viewModel.play(matchingChannel)
+                    } else {
+                        viewModel.play(
+                            com.m3u.data.database.model.Channel(
+                                id = rec.channelId,
+                                title = rec.channelName,
+                                url = rec.streamUrl,
+                                playlistUrl = "",
+                                category = "Recordings",
+                                cover = rec.coverUrl
+                            )
                         )
+                    }
+                    surface = TvSurface.Player
+                }
+            )
+
+            AnimatedVisibility(
+                visible = surface == TvSurface.Player,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                val recording = activeRecording
+                if (recording != null) {
+                    TiviMateRecordingPlayerScreen(
+                        player = player,
+                        recording = recording,
+                        isPlaying = isPlaying,
+                        onPlayPause = { viewModel.pauseOrContinue(!isPlaying) },
+                        onClose = closePlayer
+                    )
+                } else {
+                    val categoryChannels = remember(state.channels, currentCategoryName, state.favorites) {
+                        val favIds = state.favorites.map { it.id }.toSet()
+                        val allUnified = TiviMateChannelParser.groupChannels(state.channels, favIds)
+                        val filtered = when (currentCategoryName) {
+                            "Favorites" -> allUnified.filter { it.isFavorite }
+                            "All channels" -> allUnified
+                            else -> allUnified.filter { it.category.equals(currentCategoryName, ignoreCase = true) }
+                        }
+                        filtered.map { it.variants.first().channel }
+                    }
+
+                    TiviMatePlayerScreen(
+                        player = player,
+                        channel = currentChannel,
+                        channelList = state.channels,
+                        categoryChannels = categoryChannels,
+                        currentCategoryName = currentCategoryName,
+                        favoriteChannels = state.favorites,
+                        isPlaying = isPlaying,
+                        onPlayPause = { viewModel.pauseOrContinue(!isPlaying) },
+                        onSwitchChannel = { channel ->
+                            viewModel.play(channel)
+                        },
+                        onToggleFavorite = { channel ->
+                            viewModel.toggleFavorite(channel)
+                        },
+                        onBackToGuide = closePlayer
                     )
                 }
-                surface = TvSurface.Player
-            }
-        )
-
-        AnimatedVisibility(
-            visible = surface == TvSurface.Player,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
-            val recording = activeRecording
-            if (recording != null) {
-                TiviMateRecordingPlayerScreen(
-                    player = player,
-                    recording = recording,
-                    isPlaying = isPlaying,
-                    onPlayPause = { viewModel.pauseOrContinue(!isPlaying) },
-                    onClose = closePlayer
-                )
-            } else {
-                val categoryChannels = remember(state.channels, currentCategoryName, state.favorites) {
-                    val favIds = state.favorites.map { it.id }.toSet()
-                    val allUnified = TiviMateChannelParser.groupChannels(state.channels, favIds)
-                    val filtered = when (currentCategoryName) {
-                        "Favorites" -> allUnified.filter { it.isFavorite }
-                        "All channels" -> allUnified
-                        else -> allUnified.filter { it.category.equals(currentCategoryName, ignoreCase = true) }
-                    }
-                    filtered.map { it.variants.first().channel }
-                }
-
-                TiviMatePlayerScreen(
-                    player = player,
-                    channel = currentChannel,
-                    channelList = state.channels,
-                    categoryChannels = categoryChannels,
-                    currentCategoryName = currentCategoryName,
-                    favoriteChannels = state.favorites,
-                    isPlaying = isPlaying,
-                    onPlayPause = { viewModel.pauseOrContinue(!isPlaying) },
-                    onSwitchChannel = { channel ->
-                        viewModel.play(channel)
-                    },
-                    onToggleFavorite = { channel ->
-                        viewModel.toggleFavorite(channel)
-                    },
-                    onBackToGuide = closePlayer
-                )
             }
         }
 

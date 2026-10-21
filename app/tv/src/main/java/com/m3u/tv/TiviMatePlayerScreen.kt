@@ -61,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -310,19 +311,27 @@ fun TiviMatePlayerScreen(
         } catch (_: Exception) {}
     }
 
+    val isAnyPopupOpen = showLanguageDialog || showQualityDialog
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .focusRequester(playerFocusRequester)
-            .clickable {
-                if (!showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
-                    showInfobar = !showInfobar
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .focusProperties { canFocus = !isAnyPopupOpen }
+                .focusRequester(playerFocusRequester)
+                .clickable {
+                    if (!isAnyPopupOpen && !showQuickChannelDrawer) {
+                        showInfobar = !showInfobar
+                    }
                 }
-            }
-            .onPreviewKeyEvent { event ->
-                val action = event.nativeKeyEvent.action
-                val keyCode = event.nativeKeyEvent.keyCode
+                .onPreviewKeyEvent { event ->
+                    if (isAnyPopupOpen) return@onPreviewKeyEvent false
+                    val action = event.nativeKeyEvent.action
+                    val keyCode = event.nativeKeyEvent.keyCode
                 if (action == KeyEvent.ACTION_DOWN) {
                     when (keyCode) {
                         KeyEvent.KEYCODE_MENU -> {
@@ -860,6 +869,7 @@ fun TiviMatePlayerScreen(
                 }
             }
         }
+    }
 
         // =========================================================================
         // 5. DYNAMIC LANGUAGE SELECTOR (ZERO "(Internal)" OR "(Active)" JARGON)
@@ -1204,6 +1214,18 @@ private fun TiviMateSelectionPopup(
     options: List<Pair<String, () -> Unit>>,
     onDismiss: () -> Unit
 ) {
+    BackHandler { onDismiss() }
+
+    val initialFocusRequester = remember { FocusRequester() }
+    val closeFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        delay(100)
+        try {
+            initialFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+    }
+
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -1235,13 +1257,45 @@ private fun TiviMateSelectionPopup(
                     fontFamily = TvFonts.Body
                 )
 
+                var isCloseFocused by remember { mutableStateOf(false) }
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(28.dp)
+                        .size(32.dp)
                         .clip(CircleShape)
-                        .background(TvColors.SurfaceRaised)
+                        .background(if (isCloseFocused) TvColors.Focus else TvColors.SurfaceRaised)
+                        .border(
+                            BorderStroke(
+                                if (isCloseFocused) 1.5.dp else 1.dp,
+                                if (isCloseFocused) TvColors.FocusGlow else TvColors.BorderSubtle
+                            ),
+                            CircleShape
+                        )
+                        .focusRequester(closeFocusRequester)
+                        .onFocusChanged { isCloseFocused = it.isFocused }
                         .clickable { onDismiss() }
+                        .onPreviewKeyEvent { event ->
+                            if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                when (event.nativeKeyEvent.keyCode) {
+                                    KeyEvent.KEYCODE_DPAD_CENTER,
+                                    KeyEvent.KEYCODE_ENTER -> {
+                                        onDismiss()
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                        initialFocusRequester.requestFocus()
+                                        true
+                                    }
+                                    KeyEvent.KEYCODE_DPAD_LEFT,
+                                    KeyEvent.KEYCODE_DPAD_RIGHT,
+                                    KeyEvent.KEYCODE_DPAD_UP -> {
+                                        true // Trap focus strictly inside the popup
+                                    }
+                                    else -> false
+                                }
+                            } else false
+                        }
+                        .focusable()
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Close,
@@ -1256,14 +1310,20 @@ private fun TiviMateSelectionPopup(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                itemsIndexed(options) { _, (optionLabel, onSelect) ->
+                itemsIndexed(options) { index, (optionLabel, onSelect) ->
                     var isFocused by remember { mutableStateOf(false) }
                     val isChecked = optionLabel.startsWith("✓")
+                    val isFirst = index == 0
+                    val isLast = index == options.size - 1
+
+                    val itemModifier = if (isChecked || (options.none { it.first.startsWith("✓") } && isFirst)) {
+                        Modifier.focusRequester(initialFocusRequester)
+                    } else Modifier
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier
+                        modifier = itemModifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
                             .background(
@@ -1282,6 +1342,33 @@ private fun TiviMateSelectionPopup(
                             )
                             .onFocusChanged { isFocused = it.isFocused }
                             .clickable { onSelect() }
+                            .onPreviewKeyEvent { event ->
+                                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                    when (event.nativeKeyEvent.keyCode) {
+                                        KeyEvent.KEYCODE_DPAD_CENTER,
+                                        KeyEvent.KEYCODE_ENTER -> {
+                                            onSelect()
+                                            true
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_UP -> {
+                                            if (isFirst) {
+                                                closeFocusRequester.requestFocus()
+                                                true
+                                            } else false
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                            if (isLast) {
+                                                true // Trap focus at bottom
+                                            } else false
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_LEFT,
+                                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                            true // Trap focus horizontally
+                                        }
+                                        else -> false
+                                    }
+                                } else false
+                            }
                             .focusable()
                             .padding(horizontal = 14.dp, vertical = 12.dp)
                     ) {
