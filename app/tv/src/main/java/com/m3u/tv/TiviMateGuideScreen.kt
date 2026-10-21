@@ -4,7 +4,10 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Bundle
+import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.view.KeyEvent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -12,6 +15,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
@@ -59,6 +67,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -1797,37 +1806,109 @@ private fun TiviMateSearchDialog(
     var isSearchBoxFocused by remember { mutableStateOf(false) }
     var isCloseFocused by remember { mutableStateOf(false) }
 
-    // Voice search launcher
-    val speechLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val spokenText = result.data
-                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                ?.firstOrNull()
-            if (!spokenText.isNullOrBlank()) {
-                searchQuery = spokenText.trim()
-                isEditing = false
-                try {
-                    searchBoxFocusRequester.requestFocus()
-                } catch (_: Exception) {}
+    var isListening by remember { mutableStateOf(false) }
+    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+
+    // Pulsing animation for the Mic button while listening
+    val infiniteTransition = rememberInfiniteTransition(label = "micPulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(650, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
+
+    val stopVoiceSearch: () -> Unit = {
+        try {
+            speechRecognizer?.stopListening()
+            speechRecognizer?.cancel()
+        } catch (_: Exception) {}
+        isListening = false
+    }
+
+    val recognitionListener = remember {
+        object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                isListening = true
             }
+
+            override fun onBeginningOfSpeech() {
+                isListening = true
+            }
+
+            override fun onRmsChanged(rmsdB: Float) {}
+
+            override fun onBufferReceived(buffer: ByteArray?) {}
+
+            override fun onEndOfSpeech() {}
+
+            override fun onError(error: Int) {
+                isListening = false
+            }
+
+            override fun onResults(results: Bundle?) {
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val spokenText = matches?.firstOrNull()?.trim()
+                if (!spokenText.isNullOrBlank()) {
+                    searchQuery = spokenText
+                    isEditing = false
+                }
+                isListening = false
+            }
+
+            override fun onPartialResults(partialResults: Bundle?) {
+                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val spokenText = matches?.firstOrNull()?.trim()
+                if (!spokenText.isNullOrBlank()) {
+                    searchQuery = spokenText
+                }
+            }
+
+            override fun onEvent(eventType: Int, params: Bundle?) {}
         }
     }
 
-    val startVoiceSearch = {
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                speechRecognizer?.stopListening()
+                speechRecognizer?.cancel()
+                speechRecognizer?.destroy()
+                speechRecognizer = null
+            } catch (_: Exception) {}
+        }
+    }
+
+    val startVoiceSearch: () -> Unit = {
         try {
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                )
-                putExtra(RecognizerIntent.EXTRA_PROMPT, "Listening... Speak now")
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                Toast.makeText(context, "Voice recognition not available on this device", Toast.LENGTH_SHORT).show()
+            } else {
+                val recognizer = speechRecognizer ?: SpeechRecognizer.createSpeechRecognizer(context).also {
+                    speechRecognizer = it
+                }
+                recognizer.setRecognitionListener(recognitionListener)
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(
+                        RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                    )
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                }
+                try {
+                    recognizer.cancel()
+                } catch (_: Exception) {}
+                searchQuery = ""
+                isListening = true
+                recognizer.startListening(intent)
             }
-            speechLauncher.launch(intent)
-        } catch (_: Exception) {
-            Toast.makeText(context, "Voice search not available on this device", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            isListening = false
+            Toast.makeText(context, "Voice search error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -1846,15 +1927,19 @@ private fun TiviMateSearchDialog(
         }
     }
 
-    val onMicClick = {
-        if (ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.RECORD_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            startVoiceSearch()
+    val onMicClick: () -> Unit = {
+        if (isListening) {
+            stopVoiceSearch()
         } else {
-            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                startVoiceSearch()
+            } else {
+                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
         }
     }
 
@@ -1890,8 +1975,13 @@ private fun TiviMateSearchDialog(
         }
     }
 
+    // When listening to voice, Back cancels listening and stays in the Search dialog
+    BackHandler(enabled = isListening) {
+        stopVoiceSearch()
+    }
+
     // When soft keyboard is open, Back closes the keyboard and stays in the Search dialog
-    BackHandler(enabled = isEditing) {
+    BackHandler(enabled = isEditing && !isListening) {
         keyboardController?.hide()
         isEditing = false
         try {
@@ -1899,8 +1989,8 @@ private fun TiviMateSearchDialog(
         } catch (_: Exception) {}
     }
 
-    // When soft keyboard is closed, Back closes the Search dialog
-    BackHandler(enabled = !isEditing) {
+    // When soft keyboard is closed and not listening, Back closes the Search dialog
+    BackHandler(enabled = !isEditing && !isListening) {
         onDismiss()
     }
 
@@ -2004,21 +2094,31 @@ private fun TiviMateSearchDialog(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 // 1. Voice Search Mic Button (LEFT SIDE)
+                val micBg = if (isListening) {
+                    TvColors.Danger.copy(alpha = pulseAlpha)
+                } else if (isMicFocused) {
+                    TvColors.Focus
+                } else {
+                    TvColors.SurfaceRaised
+                }
+
+                val micBorder = if (isListening) {
+                    BorderStroke(2.dp, Color.White)
+                } else if (isMicFocused) {
+                    BorderStroke(1.5.dp, TvColors.FocusGlow)
+                } else {
+                    BorderStroke(1.dp, TvColors.BorderSubtle)
+                }
+
+                val micTint = if (isListening || isMicFocused) Color.White else TvColors.Accent
+
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .size(46.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            if (isMicFocused) TvColors.Focus else TvColors.SurfaceRaised
-                        )
-                        .border(
-                            BorderStroke(
-                                if (isMicFocused) 1.5.dp else 1.dp,
-                                if (isMicFocused) TvColors.FocusGlow else TvColors.BorderSubtle
-                            ),
-                            RoundedCornerShape(10.dp)
-                        )
+                        .background(micBg)
+                        .border(micBorder, RoundedCornerShape(10.dp))
                         .focusRequester(micFocusRequester)
                         .onFocusChanged { isMicFocused = it.isFocused }
                         .clickable { onMicClick() }
@@ -2053,12 +2153,20 @@ private fun TiviMateSearchDialog(
                     Icon(
                         imageVector = Icons.Rounded.Mic,
                         contentDescription = "Voice Search",
-                        tint = if (isMicFocused) Color.White else TvColors.Accent,
+                        tint = micTint,
                         modifier = Modifier.size(22.dp)
                     )
                 }
 
                 // 2. Search Text Box (RIGHT SIDE OF MIC)
+                val searchBoxBorder = if (isListening) {
+                    BorderStroke(1.5.dp, TvColors.Danger.copy(alpha = pulseAlpha))
+                } else if (isSearchBoxFocused || isEditing) {
+                    BorderStroke(1.5.dp, TvColors.FocusGlow)
+                } else {
+                    BorderStroke(1.dp, TvColors.BorderSubtle)
+                }
+
                 Box(
                     contentAlignment = Alignment.CenterStart,
                     modifier = Modifier
@@ -2066,16 +2174,11 @@ private fun TiviMateSearchDialog(
                         .height(46.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(TvColors.BackgroundSoft)
-                        .border(
-                            BorderStroke(
-                                if (isSearchBoxFocused || isEditing) 1.5.dp else 1.dp,
-                                if (isSearchBoxFocused || isEditing) TvColors.FocusGlow else TvColors.BorderSubtle
-                            ),
-                            RoundedCornerShape(10.dp)
-                        )
+                        .border(searchBoxBorder, RoundedCornerShape(10.dp))
                         .focusRequester(searchBoxFocusRequester)
                         .onFocusChanged { isSearchBoxFocused = it.isFocused }
                         .clickable {
+                            if (isListening) stopVoiceSearch()
                             isEditing = true
                         }
                         .onPreviewKeyEvent { event ->
@@ -2110,6 +2213,7 @@ private fun TiviMateSearchDialog(
                                         }
                                         KeyEvent.KEYCODE_DPAD_CENTER,
                                         KeyEvent.KEYCODE_ENTER -> {
+                                            if (isListening) stopVoiceSearch()
                                             isEditing = true
                                             true
                                         }
@@ -2168,6 +2272,29 @@ private fun TiviMateSearchDialog(
                                 }
                             }
                         )
+                    } else if (isListening) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    text = "Speak now...",
+                                    color = TvColors.Danger,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontFamily = TvFonts.Body
+                                )
+                            } else {
+                                Text(
+                                    text = searchQuery,
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = TvFonts.Body
+                                )
+                            }
+                        }
                     } else {
                         if (searchQuery.isEmpty()) {
                             Text(
@@ -2213,14 +2340,15 @@ private fun TiviMateSearchDialog(
                             Icon(
                                 imageVector = Icons.Rounded.Mic,
                                 contentDescription = null,
-                                tint = TvColors.Focus,
+                                tint = if (isListening) TvColors.Danger else TvColors.Focus,
                                 modifier = Modifier.size(28.dp)
                             )
                         }
                         Text(
-                            text = "Type channel name or press Mic to speak",
-                            color = TvColors.TextMuted,
+                            text = if (isListening) "Listening... Speak channel name now" else "Type channel name or press Mic to speak",
+                            color = if (isListening) TvColors.Danger else TvColors.TextMuted,
                             fontSize = 14.sp,
+                            fontWeight = if (isListening) FontWeight.SemiBold else FontWeight.Normal,
                             fontFamily = TvFonts.Body
                         )
                     }
