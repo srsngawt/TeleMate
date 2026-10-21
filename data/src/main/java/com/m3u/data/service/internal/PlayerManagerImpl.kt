@@ -24,6 +24,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.MediaExtractorCompat
 import androidx.media3.exoplayer.RenderersFactory
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.drm.DefaultDrmSessionManager
 import androidx.media3.exoplayer.drm.FrameworkMediaDrm
 import androidx.media3.exoplayer.drm.HttpMediaDrmCallback
@@ -136,10 +137,18 @@ class PlayerManagerImpl @Inject constructor(
     private val providerSessionCloseQueue = ProviderSessionCloseQueue(ioCoroutineScope)
     private val playerLifecycleLock = Any()
     private var activePlayerListener: Player.Listener? = null
+    private var activePlayerAnalyticsListener: AnalyticsListener? = null
     private var activePlayerGeneration: Long? = null
     private var activeRequestHeaders: Map<String, String> = emptyMap()
     private var activeProviderPlayback = false
     private var activeProviderPlaybackAllowsCrossOrigin = false
+
+    @Volatile
+    private var lastAudioAdvancingMs: Long = System.currentTimeMillis()
+    @Volatile
+    private var lastAudioRecoveryMs: Long = 0L
+    @Volatile
+    private var consecutiveAudioUnderruns: Int = 0
 
     override val playlist: StateFlow<Playlist?> = mediaCommand.flatMapLatest { command ->
         when (command) {
@@ -213,7 +222,21 @@ class PlayerManagerImpl @Inject constructor(
         mainCoroutineScope.launch {
             while (true) {
                 ensureActive()
-                playbackPosition.value = player.value?.currentPosition ?: -1L
+                val currentPlayer = player.value
+                playbackPosition.value = currentPlayer?.currentPosition ?: -1L
+                if (currentPlayer != null && currentPlayer.isPlaying && currentPlayer.playbackState == Player.STATE_READY) {
+                    val hasAudio = currentPlayer.currentTracks.groups.any {
+                        it.type == C.TRACK_TYPE_AUDIO && it.isSelected
+                    }
+                    if (hasAudio) {
+                        val elapsedSinceAudioAdvance = System.currentTimeMillis() - lastAudioAdvancingMs
+                        if (elapsedSinceAudioAdvance > 3500L) {
+                            activePlayerGeneration?.let { gen ->
+                                recoverAudioPipeline(gen, "AudioWatchdogStall: ${elapsedSinceAudioAdvance}ms")
+                            }
+                        }
+                    }
+                }
                 delay(1.seconds)
             }
         }
@@ -528,11 +551,16 @@ class PlayerManagerImpl @Inject constructor(
             chain = MimetypeChain.Unsupported("")
             player.value?.let { activePlayer ->
                 activePlayerListener?.let(activePlayer::removeListener)
+                activePlayerAnalyticsListener?.let(activePlayer::removeAnalyticsListener)
                 activePlayer.stop()
                 activePlayer.release()
             }
             activePlayerListener = null
+            activePlayerAnalyticsListener = null
             activePlayerGeneration = null
+            lastAudioAdvancingMs = System.currentTimeMillis()
+            lastAudioRecoveryMs = 0L
+            consecutiveAudioUnderruns = 0
             player.value = null
         }
     }
@@ -613,10 +641,10 @@ class PlayerManagerImpl @Inject constructor(
 
     private fun createLoadControl(): DefaultLoadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
-            15_000,
-            30_000,
-            1_000,
-            2_000
+            20_000,
+            40_000,
+            2_500,
+            4_000
         )
         .setPrioritizeTimeOverSizeThresholds(true)
         .build()
@@ -625,6 +653,7 @@ class PlayerManagerImpl @Inject constructor(
         mediaSourceFactory: MediaSource.Factory,
         tunneling: Boolean,
         listener: Player.Listener,
+        analyticsListener: AnalyticsListener,
     ): ExoPlayer = ExoPlayer.Builder(context)
         .setMediaSourceFactory(mediaSourceFactory)
         .setRenderersFactory(renderersFactory)
@@ -637,9 +666,10 @@ class PlayerManagerImpl @Inject constructor(
                 .setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
                 .build()
-            setAudioAttributes(attributes, false)
+            setAudioAttributes(attributes, true)
             playWhenReady = true
             addListener(listener)
+            addAnalyticsListener(analyticsListener)
         }
 
     private fun preparePlayer(
@@ -654,13 +684,16 @@ class PlayerManagerImpl @Inject constructor(
             synchronized(playerLifecycleLock) {
                 val preparedPlayer = player.value ?: run {
                     val listener = createPlayerListener(generation)
+                    val analyticsListener = createAudioRecoveryAnalyticsListener(generation)
                     createPlayer(
                         mediaSourceFactory = mediaSourceFactory,
                         tunneling = tunneling,
                         listener = listener,
+                        analyticsListener = analyticsListener,
                     ).also { createdPlayer ->
                         timber.d("player instance updated")
                         activePlayerListener = listener
+                        activePlayerAnalyticsListener = analyticsListener
                         activePlayerGeneration = generation
                         player.value = createdPlayer
                     }
@@ -698,6 +731,98 @@ class PlayerManagerImpl @Inject constructor(
                 handleIsPlayingChanged(generation, isPlaying)
             }
         }
+
+    private fun createAudioRecoveryAnalyticsListener(generation: Long): AnalyticsListener =
+        object : AnalyticsListener {
+            override fun onAudioPositionAdvancing(
+                eventTime: AnalyticsListener.EventTime,
+                playoutStartSystemTimeMs: Long
+            ) {
+                if (activePlayerGeneration != generation) return
+                lastAudioAdvancingMs = System.currentTimeMillis()
+                consecutiveAudioUnderruns = 0
+            }
+
+            override fun onAudioUnderrun(
+                eventTime: AnalyticsListener.EventTime,
+                bufferSize: Int,
+                bufferSizeMs: Long,
+                elapsedSinceLastFeedMs: Long
+            ) {
+                if (activePlayerGeneration != generation) return
+                consecutiveAudioUnderruns++
+                timber.w("onAudioUnderrun #$consecutiveAudioUnderruns: bufferSizeMs=$bufferSizeMs, elapsed=${elapsedSinceLastFeedMs}ms")
+                if (consecutiveAudioUnderruns >= 3 || elapsedSinceLastFeedMs > 2000L) {
+                    recoverAudioPipeline(
+                        generation,
+                        "AudioUnderrun(count=$consecutiveAudioUnderruns, elapsed=${elapsedSinceLastFeedMs}ms)"
+                    )
+                }
+            }
+
+            override fun onAudioSinkError(
+                eventTime: AnalyticsListener.EventTime,
+                audioSinkError: Exception
+            ) {
+                if (activePlayerGeneration != generation) return
+                timber.e(audioSinkError, "onAudioSinkError detected")
+                recoverAudioPipeline(
+                    generation,
+                    "AudioSinkError: ${audioSinkError.javaClass.simpleName}: ${audioSinkError.message}"
+                )
+            }
+
+            override fun onAudioCodecError(
+                eventTime: AnalyticsListener.EventTime,
+                audioCodecError: Exception
+            ) {
+                if (activePlayerGeneration != generation) return
+                timber.e(audioCodecError, "onAudioCodecError detected")
+                recoverAudioPipeline(
+                    generation,
+                    "AudioCodecError: ${audioCodecError.javaClass.simpleName}: ${audioCodecError.message}"
+                )
+            }
+        }
+
+    private fun recoverAudioPipeline(generation: Long, reason: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastAudioRecoveryMs < 3500L) {
+            return
+        }
+        lastAudioRecoveryMs = now
+        lastAudioAdvancingMs = now
+        timber.w("Attempting seamless audio recovery for generation $generation, reason: $reason")
+        mainCoroutineScope.launch {
+            synchronized(playerLifecycleLock) {
+                if (activePlayerGeneration != generation) return@synchronized
+                val currentPlayer = player.value ?: return@synchronized
+                try {
+                    val currentParams = currentPlayer.trackSelectionParameters
+                    val audioDisabledParams = currentParams.buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                        .build()
+                    currentPlayer.trackSelectionParameters = audioDisabledParams
+
+                    mainCoroutineScope.launch {
+                        delay(50)
+                        synchronized(playerLifecycleLock) {
+                            if (activePlayerGeneration != generation) return@synchronized
+                            val p = player.value ?: return@synchronized
+                            val audioReenabledParams = p.trackSelectionParameters.buildUpon()
+                                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                                .build()
+                            p.trackSelectionParameters = audioReenabledParams
+                            p.volume = 1f
+                            timber.i("Audio pipeline re-enabled successfully for generation $generation")
+                        }
+                    }
+                } catch (e: Exception) {
+                    timber.e(e, "Failed seamless audio recovery")
+                }
+            }
+        }
+    }
 
     private val renderersFactory: RenderersFactory by lazy {
         Codecs.createRenderersFactory(context)
@@ -765,6 +890,10 @@ class PlayerManagerImpl @Inject constructor(
     ) {
         providerSessionState.runIfCurrent(generation) {
             playbackState.value = state
+            if (state == Player.STATE_READY) {
+                lastAudioAdvancingMs = System.currentTimeMillis()
+                consecutiveAudioUnderruns = 0
+            }
             if (state == Player.STATE_ENDED) {
                 closeProviderSessionAsync(
                     session = providerSessionState.detach(generation),
@@ -873,6 +1002,10 @@ class PlayerManagerImpl @Inject constructor(
     ) {
         providerSessionState.runIfCurrent(generation) {
             this.isPlaying.value = isPlaying
+            if (isPlaying) {
+                lastAudioAdvancingMs = System.currentTimeMillis()
+                consecutiveAudioUnderruns = 0
+            }
         }
     }
 

@@ -805,8 +805,28 @@ fun TiviMatePlayerScreen(
                                     }
                                     h
                                 }
+                                val playbackOffsetFromLiveMs = run {
+                                    val liveOffset = player?.currentLiveOffset ?: C.TIME_UNSET
+                                    if (liveOffset != C.TIME_UNSET && liveOffset > 0L) {
+                                        liveOffset
+                                    } else {
+                                        val dur = player?.duration ?: -1L
+                                        val pos = player?.currentPosition ?: -1L
+                                        if (dur > 0L && pos in 0L..dur) {
+                                            dur - pos
+                                        } else {
+                                            15_000L + (liveDelaySeconds * 1000L)
+                                        }
+                                    }
+                                }
                                 if (currentPlayingUrl.isNotBlank()) {
-                                    StreamRecorder.start(context, recId, currentPlayingUrl, targetHeight = targetVideoHeight)
+                                    StreamRecorder.start(
+                                        context = context,
+                                        recId = recId,
+                                        streamUrl = currentPlayingUrl,
+                                        targetHeight = targetVideoHeight,
+                                        playbackOffsetFromLiveMs = playbackOffsetFromLiveMs
+                                    )
                                 }
                                 zappingToastText = "🔴 Recording started: ${channel?.title ?: "Stream"}"
                             } else {

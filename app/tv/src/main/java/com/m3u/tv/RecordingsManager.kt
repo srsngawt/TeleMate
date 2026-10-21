@@ -74,7 +74,13 @@ object StreamRecorder {
             .build()
     }
 
-    fun start(context: Context, recId: String, streamUrl: String, targetHeight: Int = 0): String {
+    fun start(
+        context: Context,
+        recId: String,
+        streamUrl: String,
+        targetHeight: Int = 0,
+        playbackOffsetFromLiveMs: Long = 15_000L
+    ): String {
         stop()
         val dir = File(context.filesDir, "recordings").apply { mkdirs() }
         val file = File(dir, "rec_${recId}.ts")
@@ -85,7 +91,7 @@ object StreamRecorder {
 
         recordingJob = CoroutineScope(Dispatchers.IO).launch {
             try {
-                recordStream(streamUrl, file, targetHeight)
+                recordStream(streamUrl, file, targetHeight, playbackOffsetFromLiveMs)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -173,7 +179,12 @@ object StreamRecorder {
         return highest?.url ?: variants.first().url
     }
 
-    private suspend fun recordStream(streamUrl: String, outputFile: File, targetHeight: Int = 0) {
+    private suspend fun recordStream(
+        streamUrl: String,
+        outputFile: File,
+        targetHeight: Int = 0,
+        playbackOffsetFromLiveMs: Long = 15_000L
+    ) {
         val request = Request.Builder()
             .url(streamUrl)
             .header("User-Agent", "Mozilla/5.0 (Linux; Android TV) TeleMate/1.0")
@@ -207,7 +218,7 @@ object StreamRecorder {
         if (isHls) {
             val initialText = withContext(Dispatchers.IO) { body.string() }
             response.close()
-            recordHls(finalUrl, initialText, outputFile, targetHeight)
+            recordHls(finalUrl, initialText, outputFile, targetHeight, playbackOffsetFromLiveMs)
         } else {
             withContext(Dispatchers.IO) {
                 body.byteStream().use { input ->
@@ -225,7 +236,15 @@ object StreamRecorder {
         }
     }
 
-    private suspend fun recordHls(initialUrl: String, initialText: String, outputFile: File, targetHeight: Int = 0) {
+    private data class HlsSegmentEntry(val url: String, val durationMs: Long)
+
+    private suspend fun recordHls(
+        initialUrl: String,
+        initialText: String,
+        outputFile: File,
+        targetHeight: Int = 0,
+        playbackOffsetFromLiveMs: Long = 15_000L
+    ) {
         var mediaPlaylistUrl = initialUrl
         var playlistText = initialText
 
@@ -258,13 +277,17 @@ object StreamRecorder {
                         continue
                     }
 
+                    var defaultTargetDurMs = 6000L
                     val targetMatch = Regex("""#EXT-X-TARGETDURATION:(\d+)""").find(mediaText)
                     if (targetMatch != null) {
-                        val durSec = targetMatch.groupValues[1].toLongOrNull() ?: 3L
+                        val durSec = targetMatch.groupValues[1].toLongOrNull() ?: 6L
+                        defaultTargetDurMs = durSec * 1000L
                         pollDelayMs = (durSec * 1000L / 2).coerceIn(1000L, 3500L)
                     }
 
-                    val segmentUrls = mutableListOf<String>()
+                    val segments = mutableListOf<HlsSegmentEntry>()
+                    var currentExtinfMs = defaultTargetDurMs
+
                     for (line in mediaText.lines()) {
                         if (!currentCoroutineContext().isActive) break
                         val trimmed = line.trim()
@@ -281,34 +304,64 @@ object StreamRecorder {
                             continue
                         }
 
+                        if (trimmed.startsWith("#EXTINF:")) {
+                            val durStr = trimmed.substringAfter("#EXTINF:").substringBefore(",").trim()
+                            val durSec = durStr.toDoubleOrNull()
+                            if (durSec != null && durSec > 0.0) {
+                                currentExtinfMs = (durSec * 1000.0).toLong()
+                            } else {
+                                currentExtinfMs = defaultTargetDurMs
+                            }
+                            continue
+                        }
+
                         if (trimmed.startsWith("#")) continue
 
                         val segUrl = resolveUrl(mediaPlaylistUrl, trimmed)
-                        segmentUrls.add(segUrl)
+                        segments.add(HlsSegmentEntry(segUrl, currentExtinfMs))
                     }
 
                     if (isFirstPlaylistFetch) {
                         isFirstPlaylistFetch = false
                         val isLive = !mediaText.contains("#EXT-X-ENDLIST")
-                        if (isLive && segmentUrls.size > 1) {
-                            // Skip past buffer history (e.g. 1 minute ago) and start strictly from the live edge
-                            val oldSegments = segmentUrls.dropLast(1)
-                            downloadedSegments.addAll(oldSegments)
+                        if (isLive && segments.size > 1) {
+                            val totalDurationMs = segments.sumOf { it.durationMs }
+                            // Calculate the exact position currently displayed on screen
+                            val targetStartMs = (totalDurationMs - playbackOffsetFromLiveMs).coerceAtLeast(0L)
+
+                            var cumulativeMs = 0L
+                            var startIndex = 0
+                            for (i in segments.indices) {
+                                val segEndMs = cumulativeMs + segments[i].durationMs
+                                if (targetStartMs < segEndMs) {
+                                    startIndex = i
+                                    break
+                                }
+                                cumulativeMs = segEndMs
+                                startIndex = i
+                            }
+
+                            // Skip all chunks that aired BEFORE the currently visible chunk on screen
+                            for (i in 0 until startIndex) {
+                                downloadedSegments.add(segments[i].url)
+                            }
                         }
                     }
 
-                    for (segUrl in segmentUrls) {
+                    for (seg in segments) {
                         if (!currentCoroutineContext().isActive) break
-                        if (downloadedSegments.add(segUrl)) {
-                            downloadChunk(segUrl, outputFile)
+                        if (downloadedSegments.add(seg.url)) {
+                            downloadChunk(seg.url, outputFile)
                         }
                     }
 
-                    if (downloadedSegments.size > 200) {
+                    if (downloadedSegments.size > 300) {
                         val it = downloadedSegments.iterator()
-                        if (it.hasNext()) {
+                        var removeCount = 0
+                        while (it.hasNext() && removeCount < 50) {
                             it.next()
                             it.remove()
+                            removeCount++
                         }
                     }
                 } else {
