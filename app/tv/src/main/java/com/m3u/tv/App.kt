@@ -140,9 +140,7 @@ fun App(
                 onCategoryChanged = { currentCategoryName = it },
                 onPlayChannel = { channel ->
                     activeRecording = null
-                    if (currentChannel?.id != channel.id) {
-                        viewModel.play(channel)
-                    }
+                    viewModel.play(channel)
                 },
                 onToggleFavorite = { channel ->
                     viewModel.toggleFavorite(channel)

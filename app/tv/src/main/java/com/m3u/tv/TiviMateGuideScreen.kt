@@ -422,9 +422,7 @@ fun TiviMateGuideScreen(
     val scope = rememberCoroutineScope()
 
     val onSelectStream: (Channel) -> Unit = { stream ->
-        if (activeChannel?.id != stream.id) {
-            onPlayChannel(stream)
-        }
+        onPlayChannel(stream)
         onOpenFullscreen()
     }
 
@@ -1321,9 +1319,7 @@ fun TiviMateGuideScreen(
                     selectedLanguages[channel.id] ?: channel.defaultLanguage,
                     selectedQualities[channel.id] ?: channel.defaultQuality
                 )
-                if (activeChannel?.id != stream.id) {
-                    onPlayChannel(stream)
-                }
+                onPlayChannel(stream)
                 onOpenFullscreen()
             },
             onDismiss = {

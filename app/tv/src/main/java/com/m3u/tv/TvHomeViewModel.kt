@@ -200,9 +200,6 @@ class TvHomeViewModel @Inject constructor(
     }
 
     fun play(channel: Channel) {
-        if (currentChannel.value?.id == channel.id && player.value?.playbackState != Player.STATE_IDLE && player.value?.playbackState != Player.STATE_ENDED) {
-            return
-        }
         viewModelScope.launch {
             playerManager.play(MediaCommand.Common(channel.id))
             channelRepository.reportPlayed(channel.id)

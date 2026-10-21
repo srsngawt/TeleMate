@@ -989,9 +989,7 @@ fun TiviMatePlayerScreen(
                                     if (isRecording) {
                                         stopAndSaveRecording()
                                     }
-                                    if (channel?.id != ch.id) {
-                                        onSwitchChannel(ch)
-                                    }
+                                    onSwitchChannel(ch)
                                     showQuickChannelDrawer = false
                                     try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
                                 }
@@ -1002,9 +1000,7 @@ fun TiviMatePlayerScreen(
                                                 if (isRecording) {
                                                     stopAndSaveRecording()
                                                 }
-                                                if (channel?.id != ch.id) {
-                                                    onSwitchChannel(ch)
-                                                }
+                                                onSwitchChannel(ch)
                                                 showQuickChannelDrawer = false
                                                 try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
                                                 true
