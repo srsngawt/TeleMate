@@ -494,14 +494,49 @@ fun TiviMateGuideScreen(
         label = "railWidth"
     )
 
-    // When TV Guide opens or isGuideVisible becomes true, automatically focus and scroll to the currently playing channel
+    // When TV Guide opens or isGuideVisible becomes true, automatically focus and scroll to the appropriate item
+    var isFirstLaunch by remember { mutableStateOf(true) }
     var wasGuideVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(isGuideVisible, activeChannel?.id, displayedChannels) {
+    LaunchedEffect(isGuideVisible, activeChannel?.id) {
         if (isGuideVisible && (!wasGuideVisible || focusedChannelIndex < 0)) {
             wasGuideVisible = true
-            if (displayedChannels.isNotEmpty()) {
-                val playingIndex = if (activeChannel != null) {
-                    val found = displayedChannels.indexOfFirst { u ->
+            if (isFirstLaunch) {
+                isFirstLaunch = false
+                selectedGroupIndex = 0
+                focusedChannelIndex = 0
+                focusedRailItemIndex = -1
+                delay(150)
+                try {
+                    categoryListState.scrollToItem(0)
+                    categoryFocusRequesters[0]?.requestFocus() ?: categoryFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            } else {
+                focusedRailItemIndex = -1
+                // Find the playing channel's actual original category (excluding Favorites)
+                if (activeChannel != null) {
+                    val activeUnified = unifiedChannels.firstOrNull { u ->
+                        u.variants.any { it.channel.id == activeChannel.id }
+                    } ?: unifiedChannels.firstOrNull { it.id == activeChannel.id }
+                    val catName = activeUnified?.category ?: activeChannel.category
+                    if (!catName.isNullOrBlank()) {
+                        val foundGroupIdx = groups.indexOfFirst {
+                            it.first.equals(catName, ignoreCase = true)
+                        }
+                        if (foundGroupIdx >= 0 && selectedGroupIndex != foundGroupIdx) {
+                            selectedGroupIndex = foundGroupIdx
+                        }
+                    }
+                }
+
+                // Compute channel index in current category
+                val currentCategoryChannels = when (val gName = groups.getOrNull(selectedGroupIndex)?.first ?: "All channels") {
+                    "Favorites" -> unifiedChannels.filter { it.isFavorite }
+                    "All channels" -> unifiedChannels
+                    else -> unifiedChannels.filter { it.category.equals(gName, ignoreCase = true) }
+                }
+
+                val playingIndex = if (activeChannel != null && currentCategoryChannels.isNotEmpty()) {
+                    val found = currentCategoryChannels.indexOfFirst { u ->
                         u.variants.any { it.channel.id == activeChannel.id }
                     }
                     if (found >= 0) found else 0
@@ -510,6 +545,7 @@ fun TiviMateGuideScreen(
                 focusedChannelIndex = playingIndex
                 delay(120)
                 try {
+                    categoryListState.scrollToItem(maxOf(0, selectedGroupIndex))
                     channelListState.scrollToItem(maxOf(0, playingIndex - 1))
                     channelFocusRequester.requestFocus()
                 } catch (_: Exception) {}
@@ -680,7 +716,7 @@ fun TiviMateGuideScreen(
                 TiviMateNavItem(
                     icon = Icons.Rounded.Tv,
                     label = "TV Guide",
-                    isSelected = selectedGroupIndex == 0 && !showSearchOverlay,
+                    isSelected = !showSearchOverlay && !showRecordingsDialog && !showSettingsDialog && currentGroupName != "Favorites",
                     isExpanded = isRailFocused,
                     focusRequester = railFocusRequester,
                     onClick = {
@@ -698,7 +734,13 @@ fun TiviMateGuideScreen(
                             showSearchOverlay = false
                         }
                         val targetIdx = selectedGroupIndex.coerceAtLeast(0)
-                        categoryFocusRequesters[targetIdx]?.requestFocus() ?: categoryFocusRequester.requestFocus()
+                        scope.launch {
+                            categoryListState.scrollToItem(targetIdx)
+                            delay(20)
+                            try {
+                                categoryFocusRequesters[targetIdx]?.requestFocus() ?: categoryFocusRequester.requestFocus()
+                            } catch (_: Exception) {}
+                        }
                     },
                     onFocusChange = {
                         if (it) focusedRailItemIndex = 1
@@ -820,6 +862,13 @@ fun TiviMateGuideScreen(
                             selectedLanguages[channel.id] ?: channel.defaultLanguage,
                             selectedQualities[channel.id] ?: channel.defaultQuality
                         )
+                        val catChannels = if (groupIdx == 0) unifiedChannels else unifiedChannels.filter { it.category.equals(groups[groupIdx].first, ignoreCase = true) }
+                        val chIdx = catChannels.indexOfFirst { it.id == channel.id }.takeIf { it >= 0 } ?: 0
+                        focusedChannelIndex = chIdx
+                        scope.launch {
+                            categoryListState.scrollToItem(groupIdx)
+                            channelListState.scrollToItem(maxOf(0, chIdx - 1))
+                        }
                         onPlayChannel(stream)
                         onOpenFullscreen()
                     },
@@ -1245,25 +1294,35 @@ fun TiviMateGuideScreen(
                                         channelFocusRequester.requestFocus()
                                     }
                                     .onPreviewKeyEvent { event ->
-                                        if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                                            when (event.nativeKeyEvent.keyCode) {
-                                                KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                                                    // Move into channel list ONLY when DPAD_RIGHT is pressed
-                                                    channelFocusRequester.requestFocus()
-                                                    true
-                                                }
-                                                KeyEvent.KEYCODE_DPAD_LEFT -> {
-                                                    // Move into Far-Left Rail when DPAD_LEFT is pressed
-                                                    railFocusRequester.requestFocus()
-                                                    true
-                                                }
-                                                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                                                    channelFocusRequester.requestFocus()
-                                                    true
-                                                }
-                                                else -> false
+                                        val nativeEvent = event.nativeKeyEvent
+                                        val isActionDown = nativeEvent.action == KeyEvent.ACTION_DOWN
+                                        when (nativeEvent.keyCode) {
+                                            KeyEvent.KEYCODE_DPAD_UP -> {
+                                                if (index == 0) true else false
                                             }
-                                        } else false
+                                            KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                                if (index == groups.size - 1) true else false
+                                            }
+                                            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                                if (isActionDown && displayedChannels.isNotEmpty()) {
+                                                    channelFocusRequester.requestFocus()
+                                                }
+                                                true
+                                            }
+                                            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                                if (isActionDown) {
+                                                    railFocusRequester.requestFocus()
+                                                }
+                                                true
+                                            }
+                                            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                                                if (isActionDown && displayedChannels.isNotEmpty()) {
+                                                    channelFocusRequester.requestFocus()
+                                                }
+                                                true
+                                            }
+                                            else -> false
+                                        }
                                     }
                                     .focusable()
                                     .padding(horizontal = 10.dp, vertical = 8.dp)
@@ -1377,6 +1436,16 @@ fun TiviMateGuideScreen(
                                 categoryFocusRequester = categoryFocusRequester,
                                 onFocused = { focusedChannelIndex = index },
                                 onSelectStream = onSelectStream,
+                                onNavigateLeft = {
+                                    scope.launch {
+                                        categoryListState.scrollToItem(selectedGroupIndex)
+                                        delay(35)
+                                        try {
+                                            categoryFocusRequesters[selectedGroupIndex]?.requestFocus()
+                                                ?: categoryFocusRequester.requestFocus()
+                                        } catch (_: Exception) {}
+                                    }
+                                },
                                 onChannelPageUp = onChannelPageUp,
                                 onChannelPageDown = onChannelPageDown,
                                 isFirstItem = index == 0,
@@ -1545,12 +1614,14 @@ private fun TiviMateChannelRow(
     categoryFocusRequester: FocusRequester,
     onFocused: () -> Unit,
     onSelectStream: (Channel) -> Unit,
+    onNavigateLeft: () -> Unit,
     onChannelPageUp: () -> Unit,
     onChannelPageDown: () -> Unit,
     isFirstItem: Boolean,
     isLastItem: Boolean
 ) {
     var isFocused by remember { mutableStateOf(false) }
+    val channelCardRequester = remember { FocusRequester() }
     val streamChannel = remember(item, selectedLanguage, selectedQuality) {
         item.getStreamFor(
             selectedLanguage ?: item.defaultLanguage,
@@ -1585,6 +1656,7 @@ private fun TiviMateChannelRow(
                     ),
                     RoundedCornerShape(6.dp)
                 )
+                .focusRequester(channelCardRequester)
                 .then(if (isTargetFocused) Modifier.focusRequester(channelFocusRequester) else Modifier)
                 .onFocusChanged {
                     isFocused = it.isFocused
@@ -1596,33 +1668,33 @@ private fun TiviMateChannelRow(
                     onSelectStream(streamChannel)
                 }
                 .onPreviewKeyEvent { event ->
-                    if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                        when (event.nativeKeyEvent.keyCode) {
-                            KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
-                                onChannelPageUp()
-                                true
-                            }
-                            KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
-                                onChannelPageDown()
-                                true
-                            }
-                            KeyEvent.KEYCODE_DPAD_UP -> {
-                                if (isFirstItem) true else false
-                            }
-                            KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                if (isLastItem) true else false
-                            }
-                            KeyEvent.KEYCODE_DPAD_LEFT -> {
-                                categoryFocusRequester.requestFocus()
-                                true
-                            }
-                            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                                onSelectStream(streamChannel)
-                                true
-                            }
-                            else -> false
+                    val nativeEvent = event.nativeKeyEvent
+                    val isActionDown = nativeEvent.action == KeyEvent.ACTION_DOWN
+                    when (nativeEvent.keyCode) {
+                        KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
+                            if (isActionDown) onChannelPageUp()
+                            true
                         }
-                    } else false
+                        KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
+                            if (isActionDown) onChannelPageDown()
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            if (isFirstItem) true else false
+                        }
+                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            if (isLastItem) true else false
+                        }
+                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            if (isActionDown) onNavigateLeft()
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                            if (isActionDown) onSelectStream(streamChannel)
+                            true
+                        }
+                        else -> false
+                    }
                 }
                 .focusable()
                 .padding(horizontal = 8.dp)
@@ -1744,7 +1816,7 @@ private fun TiviMateChannelRow(
                         onSelectStream(streamChannel)
                     },
                     onNavigateLeft = if (slotIdx == 0) {
-                        { channelFocusRequester.requestFocus() }
+                        { channelCardRequester.requestFocus() }
                     } else null
                 )
             }
