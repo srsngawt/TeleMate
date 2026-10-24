@@ -768,13 +768,30 @@ class TvHomeViewModel @Inject constructor(
                                 locale = sortLocale,
                             )
                         )
+                    val hasDefaultPlaylist = playlists.any { it.url == DEFAULT_PLAYLIST_URL }
                     if (!hasAutoSubscribed) {
                         hasAutoSubscribed = true
-                        SubscriptionWorker.m3u(
-                            workManager = workManager,
-                            title = "TeleMate India",
-                            url = DEFAULT_PLAYLIST_URL
-                        )
+                        if (!hasDefaultPlaylist || playlists.isEmpty()) {
+                            // First time launch: immediately subscribe to default playlist
+                            SubscriptionWorker.m3u(
+                                workManager = workManager,
+                                title = "TeleMate India",
+                                url = DEFAULT_PLAYLIST_URL
+                            )
+                        } else {
+                            // Smart Delayed Auto-Sync:
+                            // App launches instantly from local DB without freezing TV boot.
+                            // After 35s (when TV boot & player are smooth and stable),
+                            // silently sync any channel additions, deletions, or updated URLs from GitHub.
+                            viewModelScope.launch(Dispatchers.IO) {
+                                kotlinx.coroutines.delay(35_000L)
+                                SubscriptionWorker.m3u(
+                                    workManager = workManager,
+                                    title = "TeleMate India",
+                                    url = DEFAULT_PLAYLIST_URL
+                                )
+                            }
+                        }
                     }
                     val previous = state.selectedPlaylist
                     val selected = previous
@@ -861,6 +878,8 @@ class TvHomeViewModel @Inject constructor(
      */
     private fun observeEpgProgrammes() {
         viewModelScope.launch(Dispatchers.IO) {
+            // Initial 5s delay on cold boot so initial channel playback and guide rendering happen instantly
+            kotlinx.coroutines.delay(5_000L)
             while (true) {
                 val playlistUrl = _state.value.selectedPlaylist?.url
                 if (playlistUrl != null) {

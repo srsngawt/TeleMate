@@ -144,11 +144,15 @@ class PlayerManagerImpl @Inject constructor(
     private var activeProviderPlaybackAllowsCrossOrigin = false
 
     @Volatile
+    private var playbackStartTimeMs: Long = System.currentTimeMillis()
+    @Volatile
     private var lastAudioAdvancingMs: Long = System.currentTimeMillis()
     @Volatile
     private var lastAudioRecoveryMs: Long = 0L
     @Volatile
     private var consecutiveAudioUnderruns: Int = 0
+    @Volatile
+    private var networkRetryCount: Int = 0
 
     override val playlist: StateFlow<Playlist?> = mediaCommand.flatMapLatest { command ->
         when (command) {
@@ -229,8 +233,12 @@ class PlayerManagerImpl @Inject constructor(
                         it.type == C.TRACK_TYPE_AUDIO && it.isSelected
                     }
                     if (hasAudio) {
-                        val elapsedSinceAudioAdvance = System.currentTimeMillis() - lastAudioAdvancingMs
-                        if (elapsedSinceAudioAdvance > 3500L) {
+                        val now = System.currentTimeMillis()
+                        val elapsedSinceStart = now - playbackStartTimeMs
+                        val elapsedSinceAudioAdvance = now - lastAudioAdvancingMs
+                        // Grace period: allow 12 seconds for initial cold-start / stream startup.
+                        // Only recover if past grace period AND audio position has stalled for > 8 seconds.
+                        if (elapsedSinceStart > 12_000L && elapsedSinceAudioAdvance > 8_000L) {
                             activePlayerGeneration?.let { gen ->
                                 recoverAudioPipeline(gen, "AudioWatchdogStall: ${elapsedSinceAudioAdvance}ms")
                             }
@@ -641,10 +649,10 @@ class PlayerManagerImpl @Inject constructor(
 
     private fun createLoadControl(): DefaultLoadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
-            20_000,
-            40_000,
-            2_500,
-            4_000
+            10_000,
+            25_000,
+            1_500,
+            2_500
         )
         .setPrioritizeTimeOverSizeThresholds(true)
         .build()
@@ -700,6 +708,11 @@ class PlayerManagerImpl @Inject constructor(
                 }
                 if (activePlayerGeneration == generation) {
                     extractor = mediaExtractor
+                    playbackStartTimeMs = System.currentTimeMillis()
+                    lastAudioAdvancingMs = System.currentTimeMillis()
+                    lastAudioRecoveryMs = 0L
+                    consecutiveAudioUnderruns = 0
+                    networkRetryCount = 0
                     preparedPlayer.setMediaSource(mediaSource)
                     preparedPlayer.prepare()
                     result = preparedPlayer
@@ -752,12 +765,6 @@ class PlayerManagerImpl @Inject constructor(
                 if (activePlayerGeneration != generation) return
                 consecutiveAudioUnderruns++
                 timber.w("onAudioUnderrun #$consecutiveAudioUnderruns: bufferSizeMs=$bufferSizeMs, elapsed=${elapsedSinceLastFeedMs}ms")
-                if (consecutiveAudioUnderruns >= 3 || elapsedSinceLastFeedMs > 2000L) {
-                    recoverAudioPipeline(
-                        generation,
-                        "AudioUnderrun(count=$consecutiveAudioUnderruns, elapsed=${elapsedSinceLastFeedMs}ms)"
-                    )
-                }
             }
 
             override fun onAudioSinkError(
@@ -787,7 +794,7 @@ class PlayerManagerImpl @Inject constructor(
 
     private fun recoverAudioPipeline(generation: Long, reason: String) {
         val now = System.currentTimeMillis()
-        if (now - lastAudioRecoveryMs < 3500L) {
+        if (now - lastAudioRecoveryMs < 8000L) {
             return
         }
         lastAudioRecoveryMs = now
@@ -805,7 +812,7 @@ class PlayerManagerImpl @Inject constructor(
                     currentPlayer.trackSelectionParameters = audioDisabledParams
 
                     mainCoroutineScope.launch {
-                        delay(50)
+                        delay(100)
                         synchronized(playerLifecycleLock) {
                             if (activePlayerGeneration != generation) return@synchronized
                             val p = player.value ?: return@synchronized
@@ -965,12 +972,28 @@ class PlayerManagerImpl @Inject constructor(
                     }
                 }
 
+                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
                 PlaybackException.ERROR_CODE_IO_UNSPECIFIED -> {
-                    playbackException.value = exception
-                    closeProviderSessionForGenerationAsync(
-                        generation = generation,
-                        reason = ProviderPlaybackCloseReason.PLAYBACK_FAILED,
-                    )
+                    if (networkRetryCount < 3) {
+                        networkRetryCount++
+                        timber.w("Cold start network error, retrying playback ($networkRetryCount/3) in 2s...")
+                        mainCoroutineScope.launch {
+                            delay(2000L)
+                            if (providerSessionState.isCurrent(generation)) {
+                                tryPlay(
+                                    generation = generation,
+                                    applyContinueWatching = false,
+                                )
+                            }
+                        }
+                    } else {
+                        playbackException.value = exception
+                        closeProviderSessionForGenerationAsync(
+                            generation = generation,
+                            reason = ProviderPlaybackCloseReason.PLAYBACK_FAILED,
+                        )
+                    }
                 }
 
                 else -> {

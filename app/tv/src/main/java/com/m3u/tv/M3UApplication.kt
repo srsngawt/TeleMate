@@ -15,6 +15,9 @@ import com.m3u.data.worker.ProviderCredentialRecoveryWorker
 import com.m3u.data.worker.ProviderSessionCleanupWorker
 import com.m3u.data.worker.initializePersistedUriPermissionLeases
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -24,15 +27,16 @@ class M3UApplication : Application(), Configuration.Provider, ImageLoaderFactory
 
     override fun onCreate() {
         super.onCreate()
-        initializePersistedUriPermissionLeases(this)
-        PersistedUriPermissionCleanupWorker.enqueueRecovery(
-            WorkManager.getInstance(this)
-        )
-        ProviderCredentialRecoveryWorker.enqueue(WorkManager.getInstance(this))
-        ProviderSessionCleanupWorker.enqueue(
-            workManager = WorkManager.getInstance(this),
-        )
-        ExtensionPluginBootstrapWorker.enqueue(WorkManager.getInstance(this))
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                initializePersistedUriPermissionLeases(this@M3UApplication)
+                val wm = WorkManager.getInstance(this@M3UApplication)
+                PersistedUriPermissionCleanupWorker.enqueueRecovery(wm)
+                ProviderCredentialRecoveryWorker.enqueue(wm)
+                ProviderSessionCleanupWorker.enqueue(workManager = wm)
+                ExtensionPluginBootstrapWorker.enqueue(wm)
+            } catch (_: Exception) {}
+        }
     }
 
     override val workManagerConfiguration: Configuration by lazy {

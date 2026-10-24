@@ -54,6 +54,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -127,6 +128,7 @@ fun TiviMatePlayerScreen(
         val idx = activeZapList.indexOfFirst { it.id == channel?.id }
         if (idx >= 0) idx else 0
     }
+    var zapTargetIndex by remember(channel?.id) { mutableIntStateOf(currentChannelIndex) }
 
     val playerFocusRequester = remember { FocusRequester() }
     val actionButtonsFocusRequester = remember { FocusRequester() }
@@ -178,7 +180,7 @@ fun TiviMatePlayerScreen(
     }
 
     // Auto-hide infobar after 8 seconds of inactivity
-    LaunchedEffect(showInfobar, showLanguageDialog, showQualityDialog, showQuickChannelDrawer) {
+    LaunchedEffect(showInfobar, showLanguageDialog, showQualityDialog, showQuickChannelDrawer, channel?.id) {
         if (showInfobar && !showLanguageDialog && !showQualityDialog && !showQuickChannelDrawer) {
             delay(8000)
             showInfobar = false
@@ -234,7 +236,8 @@ fun TiviMatePlayerScreen(
     // Instant Channel Zapping strictly within current section/category
     val zapNext = {
         if (activeZapList.isNotEmpty()) {
-            val nextIndex = (currentChannelIndex + 1) % activeZapList.size
+            val nextIndex = (zapTargetIndex + 1) % activeZapList.size
+            zapTargetIndex = nextIndex
             val nextCh = activeZapList[nextIndex]
             onSwitchChannel(nextCh)
             val catPrefix = if (currentCategoryName.isNotBlank() && currentCategoryName != "All channels") "[$currentCategoryName] " else ""
@@ -244,7 +247,8 @@ fun TiviMatePlayerScreen(
 
     val zapPrev = {
         if (activeZapList.isNotEmpty()) {
-            val prevIndex = if (currentChannelIndex - 1 < 0) activeZapList.size - 1 else currentChannelIndex - 1
+            val prevIndex = if (zapTargetIndex - 1 < 0) activeZapList.size - 1 else zapTargetIndex - 1
+            zapTargetIndex = prevIndex
             val prevCh = activeZapList[prevIndex]
             onSwitchChannel(prevCh)
             val catPrefix = if (currentCategoryName.isNotBlank() && currentCategoryName != "All channels") "[$currentCategoryName] " else ""
@@ -356,12 +360,23 @@ fun TiviMatePlayerScreen(
     }
 
     LaunchedEffect(channel?.id) {
-        showInfobar = true
         liveDelaySeconds = 0L
-        delay(80)
-        try {
-            actionButtonsFocusRequester.requestFocus()
-        } catch (_: Exception) {}
+        if (!showQuickChannelDrawer) {
+            showInfobar = true
+            delay(80)
+            try {
+                actionButtonsFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        } else {
+            val targetIndex = currentChannelIndex.coerceIn(0, maxOf(0, activeZapList.size - 1))
+            try {
+                drawerListState.animateScrollToItem(maxOf(0, targetIndex - 2))
+            } catch (_: Exception) {}
+            delay(80)
+            try {
+                drawerFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -373,10 +388,38 @@ fun TiviMatePlayerScreen(
 
     val isAnyPopupOpen = showLanguageDialog || showQualityDialog
 
+    val handleChannelKeys: (KeyEvent) -> Boolean = { keyEvent ->
+        val keyCode = keyEvent.keyCode
+        val action = keyEvent.action
+        if (keyCode == KeyEvent.KEYCODE_CHANNEL_UP ||
+            keyCode == KeyEvent.KEYCODE_CHANNEL_DOWN ||
+            keyCode == KeyEvent.KEYCODE_PAGE_UP ||
+            keyCode == KeyEvent.KEYCODE_PAGE_DOWN) {
+            if (action == KeyEvent.ACTION_DOWN) {
+                showLanguageDialog = false
+                showQualityDialog = false
+                if (isRecording) {
+                    stopAndSaveRecording()
+                }
+                if (keyCode == KeyEvent.KEYCODE_CHANNEL_UP || keyCode == KeyEvent.KEYCODE_PAGE_UP) {
+                    zapNext()
+                } else {
+                    zapPrev()
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .onPreviewKeyEvent { event ->
+                handleChannelKeys(event.nativeKeyEvent)
+            }
     ) {
         Box(
             modifier = Modifier
@@ -389,6 +432,7 @@ fun TiviMatePlayerScreen(
                     }
                 }
                 .onPreviewKeyEvent { event ->
+                    if (handleChannelKeys(event.nativeKeyEvent)) return@onPreviewKeyEvent true
                     if (isAnyPopupOpen) return@onPreviewKeyEvent false
                     val action = event.nativeKeyEvent.action
                     val keyCode = event.nativeKeyEvent.keyCode
@@ -430,14 +474,6 @@ fun TiviMatePlayerScreen(
                                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MENU -> {
                                     showInfobar = false
                                     showQuickChannelDrawer = true
-                                    true
-                                }
-                                KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
-                                    zapNext()
-                                    true
-                                }
-                                KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
-                                    zapPrev()
                                     true
                                 }
                                 KeyEvent.KEYCODE_BACK -> {
