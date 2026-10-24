@@ -370,6 +370,8 @@ fun TiviMateGuideScreen(
     currentProgrammes: Map<String, Programme>,
     initialCategory: String = "All channels",
     isGuideVisible: Boolean = true,
+    unifiedChannelsInput: List<UnifiedChannel> = emptyList(),
+    groupsInput: List<Pair<String, Int>> = emptyList(),
     onCategoryChanged: (String) -> Unit = {},
     onPlayChannel: (Channel) -> Unit,
     onToggleFavorite: (Channel) -> Unit,
@@ -378,20 +380,28 @@ fun TiviMateGuideScreen(
 ) {
     val favoriteIds = remember(favoriteChannels) { favoriteChannels.map { it.id }.toSet() }
 
-    val unifiedChannels = remember(channels, favoriteIds) {
-        TiviMateChannelParser.groupChannels(channels, favoriteIds)
+    val unifiedChannels = if (unifiedChannelsInput.isNotEmpty()) {
+        unifiedChannelsInput
+    } else {
+        remember(channels, favoriteIds) {
+            TiviMateChannelParser.groupChannels(channels, favoriteIds)
+        }
     }
 
-    val groups = remember(unifiedChannels, favoriteChannels) {
-        val list = mutableListOf<Pair<String, Int>>()
-        list.add("All channels" to unifiedChannels.size)
-        list.add("Favorites" to favoriteChannels.size)
-        val categoryCounts = unifiedChannels.groupBy { it.category }
-            .mapValues { it.value.size }
-            .toList()
-            .sortedByDescending { it.second }
-        list.addAll(categoryCounts)
-        list
+    val groups = if (groupsInput.isNotEmpty()) {
+        groupsInput
+    } else {
+        remember(unifiedChannels, favoriteChannels) {
+            val list = mutableListOf<Pair<String, Int>>()
+            list.add("All channels" to unifiedChannels.size)
+            list.add("Favorites" to favoriteChannels.size)
+            val categoryCounts = unifiedChannels.groupBy { it.category }
+                .mapValues { it.value.size }
+                .toList()
+                .sortedByDescending { it.second }
+            list.addAll(categoryCounts)
+            list
+        }
     }
 
     var selectedGroupIndex by remember(groups, initialCategory) {

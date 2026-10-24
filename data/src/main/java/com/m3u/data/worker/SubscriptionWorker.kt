@@ -341,7 +341,6 @@ class SubscriptionWorker @AssistedInject constructor(
                         addTag(permissionTag)
                     }
                 }
-                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .apply {
                     if (!localSource) {
                         setConstraints(
@@ -391,7 +390,6 @@ class SubscriptionWorker @AssistedInject constructor(
                 .addTag(playlistWorkTag(playlistUrl))
                 .addTag(TAG)
                 .addTag(DataSource.EPG.value)
-                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)

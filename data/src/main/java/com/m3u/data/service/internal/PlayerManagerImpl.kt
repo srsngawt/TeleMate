@@ -228,23 +228,6 @@ class PlayerManagerImpl @Inject constructor(
                 ensureActive()
                 val currentPlayer = player.value
                 playbackPosition.value = currentPlayer?.currentPosition ?: -1L
-                if (currentPlayer != null && currentPlayer.isPlaying && currentPlayer.playbackState == Player.STATE_READY) {
-                    val hasAudio = currentPlayer.currentTracks.groups.any {
-                        it.type == C.TRACK_TYPE_AUDIO && it.isSelected
-                    }
-                    if (hasAudio) {
-                        val now = System.currentTimeMillis()
-                        val elapsedSinceStart = now - playbackStartTimeMs
-                        val elapsedSinceAudioAdvance = now - lastAudioAdvancingMs
-                        // Grace period: allow 12 seconds for initial cold-start / stream startup.
-                        // Only recover if past grace period AND audio position has stalled for > 8 seconds.
-                        if (elapsedSinceStart > 12_000L && elapsedSinceAudioAdvance > 8_000L) {
-                            activePlayerGeneration?.let { gen ->
-                                recoverAudioPipeline(gen, "AudioWatchdogStall: ${elapsedSinceAudioAdvance}ms")
-                            }
-                        }
-                    }
-                }
                 delay(1.seconds)
             }
         }
@@ -279,7 +262,7 @@ class PlayerManagerImpl @Inject constructor(
     ) {
         timber.d("play")
         if (!providerSessionState.isCurrent(generation)) return
-        releasePlayer()
+        stopPlaybackForChannelSwitch()
         val commandAccepted = providerSessionState.runIfCurrent(generation) {
             mediaCommand.value = command
         }
@@ -423,7 +406,7 @@ class PlayerManagerImpl @Inject constructor(
             )
         }
         val extractorsFactory = DefaultExtractorsFactory().setTsExtractorFlags(
-            FLAG_ALLOW_NON_IDR_KEYFRAMES and FLAG_DETECT_ACCESS_UNITS
+            FLAG_DETECT_ACCESS_UNITS
         )
         val mediaExtractor = MediaExtractorCompat(extractorsFactory, dataSourceFactory)
         val mediaSourceFactory = when (mimeType) {
@@ -542,6 +525,26 @@ class PlayerManagerImpl @Inject constructor(
             reason = ProviderPlaybackCloseReason.STOPPED,
         )
         releasePlayer()
+    }
+
+    private fun stopPlaybackForChannelSwitch() {
+        synchronized(playerLifecycleLock) {
+            extractor = null
+            activeRequestHeaders = emptyMap()
+            activeProviderPlayback = false
+            activeProviderPlaybackAllowsCrossOrigin = false
+            mediaCommand.value = null
+            size.value = Rect()
+            playbackState.value = Player.STATE_IDLE
+            isPlaying.value = false
+            playbackException.value = null
+            tracksGroups.value = emptyList()
+            chain = MimetypeChain.Unsupported("")
+            player.value?.let { activePlayer ->
+                activePlayer.stop()
+                activePlayer.clearMediaItems()
+            }
+        }
     }
 
     private fun releasePlayer() {
@@ -674,7 +677,8 @@ class PlayerManagerImpl @Inject constructor(
                 .setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
                 .build()
-            setAudioAttributes(attributes, true)
+            setAudioAttributes(attributes, false)
+            volume = 1f
             playWhenReady = true
             addListener(listener)
             addAnalyticsListener(analyticsListener)
@@ -690,7 +694,19 @@ class PlayerManagerImpl @Inject constructor(
         var result: ExoPlayer? = null
         providerSessionState.runIfCurrent(generation) {
             synchronized(playerLifecycleLock) {
-                val preparedPlayer = player.value ?: run {
+                val preparedPlayer = player.value?.also { existing ->
+                    if (activePlayerGeneration != generation) {
+                        activePlayerListener?.let(existing::removeListener)
+                        activePlayerAnalyticsListener?.let(existing::removeAnalyticsListener)
+                        val listener = createPlayerListener(generation)
+                        val analyticsListener = createAudioRecoveryAnalyticsListener(generation)
+                        existing.addListener(listener)
+                        existing.addAnalyticsListener(analyticsListener)
+                        activePlayerListener = listener
+                        activePlayerAnalyticsListener = analyticsListener
+                        activePlayerGeneration = generation
+                    }
+                } ?: run {
                     val listener = createPlayerListener(generation)
                     val analyticsListener = createAudioRecoveryAnalyticsListener(generation)
                     createPlayer(
@@ -713,8 +729,16 @@ class PlayerManagerImpl @Inject constructor(
                     lastAudioRecoveryMs = 0L
                     consecutiveAudioUnderruns = 0
                     networkRetryCount = 0
+                    preparedPlayer.volume = 1f
+                    val currentParams = preparedPlayer.trackSelectionParameters
+                    if (currentParams.disabledTrackTypes.contains(C.TRACK_TYPE_AUDIO)) {
+                        preparedPlayer.trackSelectionParameters = currentParams.buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                            .build()
+                    }
                     preparedPlayer.setMediaSource(mediaSource)
                     preparedPlayer.prepare()
+                    preparedPlayer.play()
                     result = preparedPlayer
                 }
             }
@@ -773,10 +797,6 @@ class PlayerManagerImpl @Inject constructor(
             ) {
                 if (activePlayerGeneration != generation) return
                 timber.e(audioSinkError, "onAudioSinkError detected")
-                recoverAudioPipeline(
-                    generation,
-                    "AudioSinkError: ${audioSinkError.javaClass.simpleName}: ${audioSinkError.message}"
-                )
             }
 
             override fun onAudioCodecError(
@@ -785,51 +805,8 @@ class PlayerManagerImpl @Inject constructor(
             ) {
                 if (activePlayerGeneration != generation) return
                 timber.e(audioCodecError, "onAudioCodecError detected")
-                recoverAudioPipeline(
-                    generation,
-                    "AudioCodecError: ${audioCodecError.javaClass.simpleName}: ${audioCodecError.message}"
-                )
             }
         }
-
-    private fun recoverAudioPipeline(generation: Long, reason: String) {
-        val now = System.currentTimeMillis()
-        if (now - lastAudioRecoveryMs < 8000L) {
-            return
-        }
-        lastAudioRecoveryMs = now
-        lastAudioAdvancingMs = now
-        timber.w("Attempting seamless audio recovery for generation $generation, reason: $reason")
-        mainCoroutineScope.launch {
-            synchronized(playerLifecycleLock) {
-                if (activePlayerGeneration != generation) return@synchronized
-                val currentPlayer = player.value ?: return@synchronized
-                try {
-                    val currentParams = currentPlayer.trackSelectionParameters
-                    val audioDisabledParams = currentParams.buildUpon()
-                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
-                        .build()
-                    currentPlayer.trackSelectionParameters = audioDisabledParams
-
-                    mainCoroutineScope.launch {
-                        delay(100)
-                        synchronized(playerLifecycleLock) {
-                            if (activePlayerGeneration != generation) return@synchronized
-                            val p = player.value ?: return@synchronized
-                            val audioReenabledParams = p.trackSelectionParameters.buildUpon()
-                                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-                                .build()
-                            p.trackSelectionParameters = audioReenabledParams
-                            p.volume = 1f
-                            timber.i("Audio pipeline re-enabled successfully for generation $generation")
-                        }
-                    }
-                } catch (e: Exception) {
-                    timber.e(e, "Failed seamless audio recovery")
-                }
-            }
-        }
-    }
 
     private val renderersFactory: RenderersFactory by lazy {
         Codecs.createRenderersFactory(context)
@@ -841,6 +818,7 @@ class PlayerManagerImpl @Inject constructor(
                 buildUponParameters()
                     .setForceHighestSupportedBitrate(true)
                     .setTunnelingEnabled(false)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
                     .setAudioOffloadPreferences(
                         TrackSelectionParameters.AudioOffloadPreferences.DEFAULT
                             .buildUpon()

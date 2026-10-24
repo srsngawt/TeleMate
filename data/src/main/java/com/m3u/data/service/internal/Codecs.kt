@@ -12,7 +12,7 @@ object Codecs {
     fun createRenderersFactory(context: Context): RenderersFactory {
         return NextRenderersFactory(context).apply {
             setEnableDecoderFallback(true)
-            setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         }
     }
 

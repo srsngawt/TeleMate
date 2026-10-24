@@ -64,6 +64,8 @@ data class TvUiState(
     val counts: Map<Playlist, Int> = emptyMap(),
     val selectedPlaylist: Playlist? = null,
     val channels: List<Channel> = emptyList(),
+    val unifiedChannels: List<UnifiedChannel> = emptyList(),
+    val groups: List<Pair<String, Int>> = emptyList(),
     val favorites: List<Channel> = emptyList(),
     val recent: Channel? = null,
     val loadingChannels: Boolean = false,
@@ -179,9 +181,12 @@ class TvHomeViewModel @Inject constructor(
         observePlaylists()
         observeFavorites()
         observeRecent()
-        observeExternalExtensions()
-        observeProviderAccounts()
-        refreshSubscriptionProviders()
+        viewModelScope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.delay(4000L)
+            observeExternalExtensions()
+            observeProviderAccounts()
+            refreshSubscriptionProviders()
+        }
         observeEpgProgrammes()
     }
 
@@ -818,7 +823,27 @@ class TvHomeViewModel @Inject constructor(
     private fun observeFavorites() {
         viewModelScope.launch {
             channelRepository.observeAllFavorite().collect { favorites ->
-                _state.update { it.copy(favorites = favorites) }
+                val (unified, groups) = withContext(Dispatchers.Default) {
+                    val currentChannels = _state.value.channels
+                    val favIds = favorites.map { it.id }.toSet()
+                    val uChannels = TiviMateChannelParser.groupChannels(currentChannels, favIds)
+                    val gList = mutableListOf<Pair<String, Int>>()
+                    gList.add("All channels" to uChannels.size)
+                    gList.add("Favorites" to favorites.size)
+                    val categoryCounts = uChannels.groupBy { it.category }
+                        .mapValues { it.value.size }
+                        .toList()
+                        .sortedByDescending { it.second }
+                    gList.addAll(categoryCounts)
+                    Pair(uChannels, gList)
+                }
+                _state.update {
+                    it.copy(
+                        favorites = favorites,
+                        unifiedChannels = unified,
+                        groups = groups
+                    )
+                }
             }
         }
     }
@@ -839,8 +864,8 @@ class TvHomeViewModel @Inject constructor(
                 .observeAllByPlaylistUrl(url)
                 .flowOn(Dispatchers.IO)
                 .collect { rawChannels ->
-                    val channels = withContext(Dispatchers.Default) {
-                        rawChannels
+                    val (channels, unified, groups) = withContext(Dispatchers.Default) {
+                        val sorted = rawChannels
                             .filterNot { it.hidden }
                             .sortedWith(
                                 localeAwareComparator(
@@ -849,11 +874,24 @@ class TvHomeViewModel @Inject constructor(
                                     locale = sortLocale,
                                 )
                             )
+                        val favIds = _state.value.favorites.map { it.id }.toSet()
+                        val uChannels = TiviMateChannelParser.groupChannels(sorted, favIds)
+                        val gList = mutableListOf<Pair<String, Int>>()
+                        gList.add("All channels" to uChannels.size)
+                        gList.add("Favorites" to _state.value.favorites.size)
+                        val categoryCounts = uChannels.groupBy { it.category }
+                            .mapValues { it.value.size }
+                            .toList()
+                            .sortedByDescending { it.second }
+                        gList.addAll(categoryCounts)
+                        Triple(sorted, uChannels, gList)
                     }
                     _state.update { state ->
                         if (state.selectedPlaylist?.url == url) {
                             state.copy(
                                 channels = channels,
+                                unifiedChannels = unified,
+                                groups = groups,
                                 loadingChannels = false
                             )
                         } else {

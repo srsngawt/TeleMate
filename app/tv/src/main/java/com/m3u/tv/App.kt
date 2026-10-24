@@ -137,6 +137,8 @@ fun App(
                 currentProgrammes = state.currentProgrammes,
                 initialCategory = currentCategoryName,
                 isGuideVisible = surface == TvSurface.Browse,
+                unifiedChannelsInput = state.unifiedChannels,
+                groupsInput = state.groups,
                 onCategoryChanged = { currentCategoryName = it },
                 onPlayChannel = { channel ->
                     activeRecording = null
@@ -167,9 +169,13 @@ fun App(
                         onClose = closePlayer
                     )
                 } else {
-                    val categoryChannels = remember(state.channels, currentCategoryName, state.favorites) {
-                        val favIds = state.favorites.map { it.id }.toSet()
-                        val allUnified = TiviMateChannelParser.groupChannels(state.channels, favIds)
+                    val categoryChannels = remember(state.unifiedChannels, state.channels, currentCategoryName, state.favorites) {
+                        val allUnified = if (state.unifiedChannels.isNotEmpty()) {
+                            state.unifiedChannels
+                        } else {
+                            val favIds = state.favorites.map { it.id }.toSet()
+                            TiviMateChannelParser.groupChannels(state.channels, favIds)
+                        }
                         val filtered = when (currentCategoryName) {
                             "Favorites" -> allUnified.filter { it.isFavorite }
                             "All channels" -> allUnified
