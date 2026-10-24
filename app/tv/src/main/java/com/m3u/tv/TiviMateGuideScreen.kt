@@ -325,7 +325,7 @@ private fun TiviMateTimelineHeader() {
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .background(TvColors.Surface)
+            .background(TvColors.SurfaceGlass)
             .border(BorderStroke(1.dp, TvColors.BorderSubtle))
             .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
@@ -599,7 +599,7 @@ fun TiviMateGuideScreen(
         modifier = Modifier
             .fillMaxSize()
             .focusProperties { canFocus = isGuideVisible && !showRecordingsDialog && !showSettingsDialog }
-            .background(TvColors.Background)
+            .background(TvColors.RootBackground)
             .onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                     when (event.nativeKeyEvent.keyCode) {
@@ -648,7 +648,7 @@ fun TiviMateGuideScreen(
             modifier = Modifier
                 .width(railWidth)
                 .fillMaxHeight()
-                .background(TvColors.BackgroundSoft)
+                .background(TvColors.SurfaceGlass)
                 .border(BorderStroke(1.dp, TvColors.BorderSubtle))
                 .padding(vertical = 16.dp, horizontal = 10.dp)
         ) {
@@ -904,7 +904,7 @@ fun TiviMateGuideScreen(
                         .aspectRatio(16f / 9f)
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color.Black)
-                        .border(BorderStroke(1.dp, TvColors.BorderSubtle), RoundedCornerShape(8.dp))
+                        .border(BorderStroke(1.2.dp, TvColors.BorderGlass), RoundedCornerShape(8.dp))
                         .clickable { onOpenFullscreen() }
                         .onPreviewKeyEvent { event ->
                             if ((event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN || event.nativeKeyEvent.action == KeyEvent.ACTION_UP) &&
@@ -937,7 +937,8 @@ fun TiviMateGuideScreen(
                             .align(Alignment.BottomEnd)
                             .padding(8.dp)
                             .clip(RoundedCornerShape(6.dp))
-                            .background(Color.Black.copy(alpha = 0.85f))
+                            .background(Color.Black.copy(alpha = 0.70f))
+                            .border(BorderStroke(1.dp, TvColors.BorderSubtle), RoundedCornerShape(6.dp))
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Row(
@@ -1045,6 +1046,7 @@ fun TiviMateGuideScreen(
                                         .size(34.dp)
                                         .clip(CircleShape)
                                         .background(TvColors.SurfaceRaised)
+                                        .border(BorderStroke(1.dp, TvColors.BorderSubtle), CircleShape)
                                         .clickable {
                                             onToggleFavorite(focusedUnifiedChannel.getStreamFor(activeLanguage, activeQuality))
                                         }
@@ -1091,13 +1093,20 @@ fun TiviMateGuideScreen(
                                     fontWeight = FontWeight.SemiBold,
                                     fontFamily = TvFonts.Body
                                 )
-                                Text(
-                                    text = "LIVE",
-                                    color = TvColors.Danger,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = TvFonts.Body
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(TvColors.Danger)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "LIVE",
+                                        color = Color.White,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = TvFonts.Body
+                                    )
+                                }
                             }
 
                             Spacer(modifier = Modifier.height(6.dp))
@@ -1113,7 +1122,7 @@ fun TiviMateGuideScreen(
                                     modifier = Modifier
                                         .fillMaxWidth(0.60f)
                                         .fillMaxHeight()
-                                        .background(TvColors.Focus)
+                                        .background(TvColors.Accent)
                                 )
                             }
                         }
@@ -1280,13 +1289,20 @@ fun TiviMateGuideScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 8.dp, vertical = 2.dp)
-                                    .clip(RoundedCornerShape(6.dp))
+                                    .clip(RoundedCornerShape(8.dp))
                                     .background(
                                         when {
                                             isFocused -> TvColors.Focus
                                             isSelected -> TvColors.SurfaceRaised
                                             else -> Color.Transparent
                                         }
+                                    )
+                                    .border(
+                                        BorderStroke(
+                                            if (isFocused) 1.5.dp else if (isSelected) 1.dp else 0.dp,
+                                            if (isFocused) TvColors.FocusGlow else if (isSelected) TvColors.BorderSubtle else Color.Transparent
+                                        ),
+                                        RoundedCornerShape(8.dp)
                                     )
                                     .focusRequester(rowRequester)
                                     .then(if (isSelected) Modifier.focusRequester(categoryFocusRequester) else Modifier)
@@ -1351,7 +1367,11 @@ fun TiviMateGuideScreen(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
-                                        .background(if (isFocused) Color.Black.copy(alpha = 0.25f) else TvColors.BadgeBackground)
+                                        .background(if (isFocused) Color.Black.copy(alpha = 0.35f) else TvColors.BadgeBackground)
+                                        .border(
+                                            BorderStroke(1.dp, if (isFocused) Color.White.copy(alpha = 0.2f) else TvColors.BorderSubtle),
+                                            RoundedCornerShape(6.dp)
+                                        )
                                         .padding(horizontal = 6.dp, vertical = 2.dp)
                                 ) {
                                     Text(
@@ -1509,20 +1529,20 @@ private fun TiviMateProgramSlotCard(
         modifier = Modifier
             .width(cardWidth)
             .height(48.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(
                 when {
                     isFocused -> TvColors.Focus
-                    show.isLive -> TvColors.SurfaceHighlight
+                    show.isLive -> TvColors.SurfaceRaised
                     else -> TvColors.Surface.copy(alpha = 0.7f)
                 }
             )
             .border(
                 BorderStroke(
                     if (isFocused) 1.5.dp else 1.dp,
-                    if (isFocused) TvColors.FocusGlow else TvColors.BorderSubtle.copy(alpha = 0.6f)
+                    if (isFocused) TvColors.FocusGlow else if (show.isLive) TvColors.BorderGlass else TvColors.BorderSubtle.copy(alpha = 0.6f)
                 ),
-                RoundedCornerShape(6.dp)
+                RoundedCornerShape(8.dp)
             )
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onSelect() }
@@ -1595,15 +1615,15 @@ private fun TiviMateProgramSlotCard(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(2.dp)
-                        .clip(RoundedCornerShape(1.dp))
+                        .height(2.5.dp)
+                        .clip(RoundedCornerShape(1.5.dp))
                         .background(Color.White.copy(alpha = 0.2f))
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(show.progress)
                             .fillMaxHeight()
-                            .background(if (isFocused) Color.White else TvColors.Focus)
+                            .background(if (isFocused) Color.White else TvColors.Accent)
                     )
                 }
             }
@@ -1651,20 +1671,20 @@ private fun TiviMateChannelRow(
             modifier = Modifier
                 .width(240.dp)
                 .height(48.dp)
-                .clip(RoundedCornerShape(6.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(
                     when {
                         isFocused -> TvColors.Focus
-                        isPlayingThis -> TvColors.SurfaceRaised
+                        isPlayingThis -> TvColors.SurfaceHighlight
                         else -> TvColors.Surface
                     }
                 )
                 .border(
                     BorderStroke(
                         if (isFocused) 1.5.dp else 1.dp,
-                        if (isFocused) TvColors.FocusGlow else TvColors.BorderSubtle
+                        if (isFocused) TvColors.FocusGlow else if (isPlayingThis) TvColors.BorderActive else TvColors.BorderSubtle
                     ),
-                    RoundedCornerShape(6.dp)
+                    RoundedCornerShape(8.dp)
                 )
                 .focusRequester(channelCardRequester)
                 .then(if (isTargetFocused) Modifier.focusRequester(channelFocusRequester) else Modifier)
@@ -1777,7 +1797,8 @@ private fun TiviMateChannelRow(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
-                            .background(if (isFocused) Color.Black.copy(alpha = 0.3f) else TvColors.BadgeBackground)
+                            .background(if (isFocused) Color.Black.copy(alpha = 0.35f) else TvColors.BadgeBackground)
+                            .border(BorderStroke(1.dp, if (isFocused) Color.White.copy(alpha = 0.2f) else TvColors.BorderSubtle), RoundedCornerShape(4.dp))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
@@ -1856,14 +1877,14 @@ private fun TiviMateNavItem(
             .clip(RoundedCornerShape(8.dp))
             .background(
                 when {
-                    isFocused -> TvColors.FocusSurface
+                    isFocused -> TvColors.Focus
                     isSelected -> TvColors.SurfaceRaised
                     else -> Color.Transparent
                 }
             )
             .border(
                 BorderStroke(
-                    if (isFocused) 1.2.dp else if (isSelected) 1.dp else 0.dp,
+                    if (isFocused) 1.5.dp else if (isSelected) 1.dp else 0.dp,
                     if (isFocused) TvColors.FocusGlow else if (isSelected) TvColors.BorderSubtle else Color.Transparent
                 ),
                 RoundedCornerShape(8.dp)
@@ -2677,9 +2698,9 @@ private fun TiviMateRecordingsDialog(
         Column(
             modifier = Modifier
                 .widthIn(min = 400.dp, max = 560.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(TvColors.Surface)
-                .border(BorderStroke(1.dp, TvColors.BorderSubtle), RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(16.dp))
+                .background(TvColors.SurfaceRaised)
+                .border(BorderStroke(1.dp, TvColors.BorderGlass), RoundedCornerShape(16.dp))
                 .clickable(enabled = false) {}
                 .padding(24.dp)
         ) {
@@ -3160,9 +3181,9 @@ private fun TiviMateSettingsDialog(
         Column(
             modifier = Modifier
                 .widthIn(min = 360.dp, max = 460.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(TvColors.Surface)
-                .border(BorderStroke(1.dp, TvColors.BorderSubtle), RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(16.dp))
+                .background(TvColors.SurfaceRaised)
+                .border(BorderStroke(1.dp, TvColors.BorderGlass), RoundedCornerShape(16.dp))
                 .clickable(enabled = false) {}
                 .padding(24.dp)
         ) {

@@ -912,7 +912,7 @@ fun TiviMatePlayerScreen(
                 modifier = Modifier
                     .width(320.dp)
                     .fillMaxHeight()
-                    .background(TvColors.Background.copy(alpha = 0.96f))
+                    .background(TvColors.SurfaceGlass.copy(alpha = 0.95f))
                     .border(BorderStroke(1.dp, TvColors.BorderSubtle))
                     .padding(16.dp)
             ) {
@@ -1258,7 +1258,7 @@ private fun TiviMateActionButton(
             .clip(RoundedCornerShape(8.dp))
             .background(if (isFocused) TvColors.Focus else TvColors.SurfaceRaised)
             .border(
-                BorderStroke(1.2.dp, if (isFocused) TvColors.FocusGlow else TvColors.BorderSubtle),
+                BorderStroke(1.5.dp, if (isFocused) TvColors.FocusGlow else TvColors.BorderSubtle),
                 RoundedCornerShape(8.dp)
             )
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)

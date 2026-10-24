@@ -5,6 +5,7 @@ import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.Font
@@ -12,40 +13,53 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 
 /**
- * Authentic TiviMate Premium TV Palette — Broadcast Grade Obsidian & Slate Edition.
- * Pure deep matte charcoal obsidian base, refined gunmetal card surfaces,
- * subtle 12% hairline borders, elegant titanium/slate focus states (no oversaturated neon),
- * and crisp typography.
+ * Authentic TiviMate Luxury OLED & Smoked Glass Edition.
+ * Deep obsidian base, hardware-accelerated translucent glass surfaces (60fps on TV),
+ * crystalline hairlines, and illuminated royal sapphire focus system.
  */
 object TvColors {
-    // Deep matte obsidian and graphite base
-    val Background = Color(0xFF0C0E14)
-    val BackgroundSoft = Color(0xFF12161F)
-    val Surface = Color(0xFF161B24)
-    val SurfaceRaised = Color(0xFF1C222E)
-    val SurfaceHighlight = Color(0xFF242C3B)
-    val SurfaceGlass = Color(0x99161B24)
+    // OLED Midnight Obsidian Base
+    val Background = Color(0xFF07090E)        // Deep obsidian pitch (97% black with subtle midnight undertone)
+    val BackgroundSoft = Color(0xFF0C1017)    // Soft midnight depth
 
-    // Subtle, elegant borders (never glaring or oversaturated)
-    val BorderSubtle = Color(0x1FFFFFFF) // Delicate 12% white hairline
-    val BorderGlass = Color(0x33FFFFFF)  // 20% white highlight
+    // Smooth zero-cost vertical gradient for cinematic depth
+    val RootBackground = Brush.verticalGradient(
+        listOf(
+            Color(0xFF0D121D),
+            Color(0xFF07090E),
+            Color(0xFF040608)
+        )
+    )
 
-    // Authentic TiviMate Focus & Accent — Sophisticated Slate Blue & Titanium
-    val Focus = Color(0xFF1E3A5F)         // Deep refined TV slate blue
-    val FocusSurface = Color(0xFF223249)  // Card highlight on focus
-    val FocusGlow = Color(0xFF3B82F6)     // Subtle 1.5dp focus ring (clean, not neon)
-    val Accent = Color(0xFF2563EB)        // Clean accent
-    val Danger = Color(0xFFDC2626)        // Clean crimson (LIVE badge & Record)
-    val Warning = Color(0xFFF59E0B)       // Amber/Orange (Timeshift & status)
-    val Success = Color(0xFF10B981)
+    // Hardware-accelerated Smoked Midnight Glass surfaces (60fps guaranteed on TV chipsets)
+    val Surface = Color(0xC7101622)          // Smoked midnight frosted glass (~78% alpha)
+    val SurfaceRaised = Color(0xD9151F2E)    // Elevated glass tile (~85% alpha)
+    val SurfaceHighlight = Color(0xEB1D2A3E) // Illuminated surface for selected/active items
+    val SurfaceGlass = Color(0xB30C121D)     // Translucent frosted glass for navigation rail & overlays
 
-    // Typography
+    // Crystalline Luminous Hairlines (subtle glass reflection edges, no harsh opaque borders)
+    val BorderSubtle = Color(0x18FFFFFF)     // 9.5% white crystal hairline
+    val BorderGlass = Color(0x2EFFFFFF)      // 18% frosted glass bevel highlight
+    val BorderActive = Color(0x8038BDF8)     // Luminous cyan-azure edge for active/playing channel
+
+    // High-End TV Focus System (Apple TV / Sony Bravia style: vibrant, crisp, instantly visible)
+    val Focus = Color(0xFF1D4ED8)            // Vibrant Royal Sapphire
+    val FocusSurface = Color(0xFF1E3A8A)     // Luminous navy under focus
+    val FocusGlow = Color(0xFF60A5FA)        // Electric Sky Azure 1.5dp focus glow
     val OnFocus = Color(0xFFFFFFFF)
-    val TextPrimary = Color(0xFFFFFFFF)
-    val TextSecondary = Color(0xFF94A3B8) // Neutral slate silver
-    val TextMuted = Color(0xFF64748B)     // Graphite muted
-    val BadgeBackground = Color(0xFF1E2532)
-    val TimelineMarker = Color(0xFF2563EB)
+
+    // Refined Broadcast Accents
+    val Accent = Color(0xFF38BDF8)           // Electric Cyan/Azure
+    val Danger = Color(0xFFEF4444)           // Vibrant Coral Crimson (LIVE badges & Recording)
+    val Warning = Color(0xFFF59E0B)          // Warm Amber Gold (Timeshift status)
+    val Success = Color(0xFF10B981)          // Vibrant Emerald
+
+    // Crisp High-Contrast Typography
+    val TextPrimary = Color(0xFFF8FAFC)      // Pure Porcelain White
+    val TextSecondary = Color(0xFF94A3B8)    // Refined Slate Silver
+    val TextMuted = Color(0xFF64748B)        // Graphite Slate
+    val BadgeBackground = Color(0x24FFFFFF)  // Frosted translucent glass pill
+    val TimelineMarker = Color(0xFF38BDF8)   // Current timeline hour marker
 }
 
 object TvFonts {

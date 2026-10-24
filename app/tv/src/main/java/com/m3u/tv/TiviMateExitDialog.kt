@@ -71,9 +71,9 @@ fun TiviMateExitDialog(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .widthIn(min = 340.dp, max = 440.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(TvColors.Surface)
-                .border(BorderStroke(1.dp, TvColors.BorderSubtle), RoundedCornerShape(14.dp))
+                .clip(RoundedCornerShape(16.dp))
+                .background(TvColors.SurfaceRaised)
+                .border(BorderStroke(1.dp, TvColors.BorderGlass), RoundedCornerShape(16.dp))
                 .clickable(enabled = false) {}
                 .padding(24.dp)
         ) {

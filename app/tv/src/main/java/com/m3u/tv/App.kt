@@ -121,7 +121,7 @@ fun App(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(TvColors.Background)
+            .background(TvColors.RootBackground)
             .windowInsetsPadding(WindowInsets.safeDrawing)
     ) {
         Box(
