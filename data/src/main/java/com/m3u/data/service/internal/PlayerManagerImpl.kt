@@ -405,9 +405,7 @@ class PlayerManagerImpl @Inject constructor(
                 providerPlaybackAllowsCrossOrigin = providerPlaybackAllowsCrossOrigin,
             )
         }
-        val extractorsFactory = DefaultExtractorsFactory().setTsExtractorFlags(
-            FLAG_DETECT_ACCESS_UNITS
-        )
+        val extractorsFactory = DefaultExtractorsFactory()
         val mediaExtractor = MediaExtractorCompat(extractorsFactory, dataSourceFactory)
         val mediaSourceFactory = when (mimeType) {
             MimeTypes.APPLICATION_M3U8 -> HlsMediaSource.Factory(dataSourceFactory)
@@ -677,7 +675,7 @@ class PlayerManagerImpl @Inject constructor(
                 .setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
                 .build()
-            setAudioAttributes(attributes, false)
+            setAudioAttributes(attributes, true)
             volume = 1f
             playWhenReady = true
             addListener(listener)
